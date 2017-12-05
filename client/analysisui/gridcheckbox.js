@@ -1,69 +1,74 @@
 'use strict';
 
-var $ = require('jquery');
-var _ = require('underscore');
-var GridOptionControl = require('./gridoptioncontrol');
-var ChildLayoutSupport = require('./childlayoutsupport');
+const $ = require('jquery');
+const _ = require('underscore');
+const OptionControl = require('./optioncontrol');
+const GridControl = require('./gridcontrol');
+const ChildLayoutSupport = require('./childlayoutsupport');
+const FormatDef = require('./formatdef');
+const Icons = require('./iconsupport');
 
-var GridCheckbox = function(params) {
+const GridCheckbox = function(params) {
 
-    GridOptionControl.extendTo(this, params);
+    OptionControl.extendTo(this, params);
+    GridControl.extendTo(this, params);
 
-    this.registerSimpleProperty("checkedValue", null);
+    this.registerSimpleProperty("format", FormatDef.bool);
+    Icons.addSupport(this);
 
-    this.onRenderToGrid = function(grid, row, column) {
-        var id = this.option.getName();
-        var type = "checkbox";
-        this.checkedValue = this.getPropertyValue('checkedValue');
+    this.$_subel = $('<div class="silky-option-checkbox silky-control-margin-' + this.getPropertyValue("margin") + '" style="white-space: nowrap;"></div>');
 
-        var value = this.option.getValue();
-        var label = this.getPropertyValue('label');
+    this.$el = this.$_subel;
+
+
+
+    let horizontalAlign = this.getPropertyValue("horizontalAlignment");
+    this.$_subel.attr('data-horizontal-align', horizontalAlign);
+
+    this.createItem = function() {
+        let type = "checkbox";
+        this.checkedValue = this.getPropertyValue('optionPart');
+
+        let value = this.getSourceValue();
+        let label = this.getPropertyValue('label');
         if (label === null)
             label = this.getPropertyValue('name');
 
-        if (this.checkedValue !== null) {
-            if (Array.isArray(value) === false)
-                value = false;
-            else {
-                for (let i = 0; i < value.length; i++) {
-                    if (value[i] === this.checkedValue) {
-                        value = true;
-                        break;
-                    }
-                }
-                if (value !== true)
-                    value = false;
-            }
+        let $checkbox = $('<label style="white-space: nowrap;"></label>');
+        this.$input = $('<input class="silky-option-input" type="checkbox" value="value" ' +  (value ? 'checked' : '') + ' >');
+        this.$label = $('<span>' + label + '</span>');
+        $checkbox.append(this.$input);
+        $checkbox.append(this.$label);
+        this.$_subel.append($checkbox);
+
+        if (Icons.exists(this)) {
+            this.$icons = Icons.get(this);
+            let iconPosition = Icons.position(this);
+            if (iconPosition === 'right')
+                this.$_subel.append(this.$icons);
+            else
+                this.$_subel.prepend(this.$icons);
         }
 
-
-        this.$el = $('<label class="silky-option-checkbox silky-control-margin-' + this.getPropertyValue("margin") + '" style="white-space: nowrap;"><input id="' + id + '" class="silky-option-input" type="checkbox" value="value" ' +  (value ? 'checked' : '') + ' ><span>' + label + '</span></label>');
-
-        var self = this;
-        this.$input = this.$el.find('input');
-        this.$input.change(function(event) {
-            var value = self.$input[0].checked;
-            self.setValue(value);
+        this.$input.change((event) => {
+            let value = this.$input[0].checked;
+            this.setValue(value);
         });
-
-        var cell = grid.addCell(column, row, true, this.$el);
-        cell.setAlignment("left", "center");
-
-        return { height: 1, width: 1, cell: cell };
     };
 
-    this.onOptionValueChanged = function(keys, data) {
-        this.$input.prop('checked', this.getValue(keys));
+    this.onOptionValueChanged = function(key, data) {
+        if (this.$input)
+            this.$input.prop('checked', this.getValue());
     };
 
     this.onPropertyChanged = function(name) {
         if (name === 'enable') {
-            var enabled = this.getPropertyValue(name);
-            this.$el.find('input').prop('disabled', enabled === false);
+            let enabled = this.getPropertyValue(name);
+            this.$_subel.find('input').prop('disabled', enabled === false);
             if (enabled)
-                this.$el.removeClass('disabled-text');
+                this.$_subel.removeClass('disabled-text');
             else
-                this.$el.addClass('disabled-text');
+                this.$_subel.addClass('disabled-text');
         }
     };
 
@@ -90,7 +95,7 @@ var GridCheckbox = function(params) {
         if (this.checkedValue === null)
             return baseFunction.call(this, value, keys);
 
-        let list = this.option.getValue();
+        let list = this.getSourceValue();
         if (list === null || Array.isArray(list) === false)
             list = [];
         else

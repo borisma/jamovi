@@ -4,24 +4,27 @@
 
 'use strict';
 
-var _ = require('underscore');
-var $ = require('jquery');
-var Backbone = require('backbone');
+const _ = require('underscore');
+const $ = require('jquery');
+const Backbone = require('backbone');
 Backbone.$ = $;
 const keyboardJS = require('keyboardjs');
+
+const VariableModel = require('./vareditor/variablemodel');
+const EditorWidget = require('./vareditor/editorwidget');
 
 const VariableEditor = Backbone.View.extend({
     className: 'VariableEditor',
     initialize() {
         this.$el.empty();
-        this.$el.addClass('silky-variable-editor');
+        this.$el.addClass('jmv-variable-editor');
 
-        this.$main = $('<div class="silky-variable-editor-main"></div>').appendTo(this.$el);
+        this.$main = $('<div class="jmv-variable-editor-main" data-type="none"></div>').appendTo(this.$el);
 
-        this.$ok = $('<div class="silky-variable-editor-ok"><span class="mif-checkmark"></span><span class="mif-arrow-up"></span></div>').appendTo(this.$main);
-        this.$revert = $('<div class="silky-variable-editor-revert"><span class="mif-undo"></span></div>').appendTo(this.$main);
-        this.$left = $('<div class="silky-variable-editor-button-left"><span class="mif-chevron-left"></span></div>').appendTo(this.$main);
-        this.$right = $('<div class="silky-variable-editor-button-right"><span class="mif-chevron-right"></span></div>').appendTo(this.$main);
+        this.$ok = $('<div class="jmv-variable-editor-ok"><span class="mif-checkmark"></span><span class="mif-arrow-up"></span></div>').appendTo(this.$main);
+        this.$revert = $('<div class="jmv-variable-editor-revert"><span class="mif-undo"></span></div>').appendTo(this.$main);
+        this.$left = $('<div class="jmv-variable-editor-button-left"><span class="mif-chevron-left"></span></div>').appendTo(this.$main);
+        this.$right = $('<div class="jmv-variable-editor-button-right"><span class="mif-chevron-right"></span></div>').appendTo(this.$main);
 
         this.editorModel = new VariableModel(this.model);
 
@@ -57,8 +60,15 @@ const VariableEditor = Backbone.View.extend({
             let column = this.model.attributes.columns[this.model.attributes.editingVar];
             for (let changes of event.changes) {
                 if (changes.id === column.id) {
-                    if (changes.measureTypeChanged || changes.levelsChanged || changes.nameChanged)
+                    if (changes.columnTypeChanged) {
+                        let index = column.index;
+                        this.model.set('editingVar', index - 1, { silent: true });
+                        this.model.set('editingVar', index);
                         this._update();
+                    }
+                    else if (changes.measureTypeChanged || changes.levelsChanged || changes.nameChanged) {
+                        this._update();
+                    }
                     break;
                 }
             }
@@ -90,7 +100,7 @@ const VariableEditor = Backbone.View.extend({
         this._moveRight = function() {
             let colNo = this.model.attributes.editingVar;
             colNo++;
-            if (colNo <= this.model.attributes.columnCount - 1)
+            if (colNo <= this.model.attributes.vColumnCount - 1)
                 this.model.set('editingVar', colNo);
         };
 
@@ -118,34 +128,28 @@ const VariableEditor = Backbone.View.extend({
     _update() {
         let columnName = this.model.attributes.editingVar;
         let column = this.model.attributes.columns[columnName];
-        this.editorModel.setup({
-            name : column.name,
-            id : column.id,
-            measureType : column.measureType,
-            autoMeasure : column.autoMeasure,
-            levels : column.levels,
-        });
+        this.$main.attr('data-type', column.columnType);
+        this.editorModel.setColumn(column.id);
     },
     _editingVarChanged(event) {
         let prev = this.model.previous('editingVar');
         let now  = event.changed.editingVar;
 
         if ((prev === null || now === null) && prev !== now)
-            this.trigger("visibility-changing", prev === null && now !== null);
+            this.trigger('visibility-changing', prev === null && now !== null);
 
-        if (now !== null) {
-            this.$el.removeClass('hidden');
-            this.$left.toggleClass('hidden', now <= 0);
-            this.$right.toggleClass('hidden', now >= this.model.attributes.columnCount - 1);
-            this._previousKeyboardContext = keyboardJS.getContext();
-            keyboardJS.setContext('spreadsheet');
+        if (now === null) {
+            this.$el.addClass('hidden');
+            if (prev !== null)
+                this.editors[0].detach();
+            keyboardJS.setContext(this._previousKeyboardContext);
         }
         else {
-            keyboardJS.setContext(this._previousKeyboardContext);
-            this.$el.addClass('hidden');
-        }
-
-        if (now !== null) {
+            this.$el.removeClass('hidden');
+            this.$left.toggleClass('hidden', now <= 0);
+            this.$right.toggleClass('hidden', now >= this.model.attributes.vColumnCount - 1);
+            this._previousKeyboardContext = keyboardJS.getContext();
+            keyboardJS.setContext('spreadsheet');
 
             let editor;
             let $editor;
@@ -195,279 +199,6 @@ const VariableEditor = Backbone.View.extend({
                 }, 10);
             }
         }
-    }
-});
-
-const VariableModel = Backbone.Model.extend({
-
-    initialize(dataset) {
-        this.dataset = dataset;
-        this.original = { };
-
-        this.on('change', event => {
-            let changes = false;
-            for (let name in this.original) {
-                if ( ! _.isEqual(this.attributes[name], this.original[name])) {
-                    changes = true;
-                    break;
-                }
-            }
-            this.set('changes', changes);
-            this.dataset.set('varEdited', changes);
-        });
-    },
-    defaults : {
-        name : null,
-        id: null,
-        measureType : null,
-        autoMeasure : false,
-        levels : null,
-        dps : 0,
-        changes : false,
-    },
-    setup(dict) {
-        this.original = dict;
-        this.set(dict);
-    },
-    apply() {
-
-        if (this.attributes.changes === false)
-            return;
-
-        let values = {
-            name: this.attributes.name,
-            measureType: this.attributes.measureType,
-            autoMeasure: this.attributes.autoMeasure,
-            levels: this.attributes.levels,
-            dps: this.attributes.dps,
-        };
-
-        this.dataset.changeColumn(this.attributes.id, values);
-
-        this.original = values;
-        this.set(this.original);
-        this.set('changes', false);
-        this.dataset.set('varEdited', false);
-    },
-    revert() {
-        this.setup(this.original);
-    }
-});
-
-const EditorWidget = Backbone.View.extend({
-    className: "EditorWidget",
-    initialize(args) {
-
-        this.attached = true;
-
-        this.$el.empty();
-        this.$el.addClass('silky-variable-editor-widget');
-
-        this.$title = $('<input class="silky-variable-editor-widget-title" type="text" maxlength="63">').appendTo(this.$el);
-        this._currentKeyboardContext = '';
-        this.$title.focus(() => {
-            this._currentKeyboardContext = keyboardJS.getContext();
-            keyboardJS.setContext('');
-            this.$title.select();
-        } );
-        this.$title.on("change keyup paste", () => {
-            let newName = this.$title.val().trim();
-            this.model.set({ name: newName });
-        } );
-        this.$title.blur(() => {
-            keyboardJS.setContext(this._currentKeyboardContext);
-        } );
-
-        this.$title.keydown((event) => {
-            var keypressed = event.keyCode || event.which;
-            if (keypressed === 13) { // enter key
-                this.$title.blur();
-                if (this.model.get('changes'))
-                    this.model.apply();
-                event.preventDefault();
-                event.stopPropagation();
-            }
-            else if (keypressed === 27) { // escape key
-                this.$title.blur();
-                if (this.model.get('changes'))
-                    this.model.revert();
-                event.preventDefault();
-                event.stopPropagation();
-            }
-        });
-
-        this.$body = $('<div class="silky-variable-editor-widget-body"></div>').appendTo(this.$el);
-        this.$left = $('<div class="silky-variable-editor-widget-left"></div>').appendTo(this.$body);
-        this.$types = $('<div class="silky-variable-editor-widget-types"></div>').appendTo(this.$left);
-        this.$autoType = $('<div class="silky-variable-editor-autotype">(auto adjusting)</div>').appendTo(this.$left);
-        this.$levels = $('<div class="silky-variable-editor-levels"></div>').appendTo(this.$body);
-        this.$levelItems = $();
-
-        this.$move = $('<div class="silky-variable-editor-widget-move"></div>').appendTo(this.$body);
-        this.$moveUp = $('<div class="silky-variable-editor-widget-move-up"><span class="mif-arrow-up"></span></div>').appendTo(this.$move);
-        this.$moveDown = $('<div class="silky-variable-editor-widget-move-down"><span class="mif-arrow-down"></span></div>').appendTo(this.$move);
-
-        this.$moveUp.on('click', event => this._moveUp());
-        this.$moveDown.on('click', event => this._moveDown());
-        this.selectedLevelIndex = -1;
-
-        let options = [
-            { label: 'Continuous',   measureType: 'continuous' },
-            { label: 'Ordinal',      measureType: 'ordinal' },
-            { label: 'Nominal',      measureType: 'nominal' },
-            { label: 'Nominal Text', measureType: 'nominaltext' },
-        ];
-
-        this.resources = { };
-
-        let unique = Math.random();
-
-        let optionClicked = (event) => {
-            this.model.set({ measureType: event.data, autoMeasure: false });
-        };
-
-        for (let option of options) {
-            let measureType = option.measureType;
-            let $option = $('<div   data-type="' + measureType + '" class="silky-variable-editor-widget-option">').appendTo(this.$types);
-            let $input  = $('<input data-type="' + measureType + '" name="' + unique + '" type="radio">').appendTo($option);
-            let $icon   = $('<div   data-type="' + measureType + '" class="silky-variable-editor-variable-type"></div>').appendTo($option);
-            let $label  = $('<span>' + option.label + '</span>').appendTo($option);
-
-            $option.on('click', null, measureType, optionClicked);
-
-            this.resources[option.measureType] = { $option : $option, $input : $input };
-        }
-
-        this.$typesHighlight = $('<div class="silky-variable-editor-widget-types-highlight"></div>').appendTo(this.$types);
-
-        this.model.on('change:name', event => {
-            if ( ! this.attached)
-                return;
-            let name = event.changed.name;
-            if (name !== this.$title.val())
-                this.$title.val(name);
-        });
-        this.model.on('change:measureType', event => this._setType(event.changed.measureType));
-        this.model.on('change:levels',      event => this._setLevels(event.changed.levels));
-        this.model.on('change:autoMeasure', event => this._setAutoMeasure(event.changed.autoMeasure));
-    },
-    _moveUp() {
-        if (this.attached === false)
-            return;
-        if (this.model.attributes.measureType === 'continuous')
-            return;
-        let index = this.selectedLevelIndex;
-        if (index < 1)
-            return;
-        let levels = this.model.get('levels');
-        let clone  = levels.slice(0);
-        let item   = clone.splice(index, 1)[0];
-        clone.splice(index - 1, 0, item);
-        this.selectedLevelIndex--;
-        this.model.set('levels', clone);
-    },
-    _moveDown() {
-        if (this.attached === false)
-            return;
-        if (this.model.attributes.measureType === 'continuous')
-            return;
-        let index = this.selectedLevelIndex;
-        let levels = this.model.get('levels');
-        if (index === -1 || index >= levels.length - 1)
-            return;
-        let clone  = levels.slice(0);
-        let item   = clone.splice(index, 1)[0];
-        clone.splice(index + 1, 0, item);
-        this.selectedLevelIndex++;
-        this.model.set('levels', clone);
-    },
-    _enableDisableMoveButtons() {
-        if (this.model.attributes.measureType !== 'continuous') {
-            let levels = this.model.get('levels');
-            let index  = this.selectedLevelIndex;
-            this.$moveUp.toggleClass('disabled', index < 1);
-            this.$moveDown.toggleClass('disabled', index >= levels.length - 1 || index === -1);
-        }
-        else {
-            this.$moveUp.addClass('disabled');
-            this.$moveDown.addClass('disabled');
-        }
-    },
-    _setType(measureType) {
-        if (this.attached) {
-            for (let t in this.resources) {
-                let $option = this.resources[t].$option;
-
-                if (t === measureType) {
-                    let $input  = this.resources[measureType].$input;
-                    $input.prop('checked', true);
-                    $option.addClass('selected');
-
-                    let css = $option.position();
-                    css.width = $option.width();
-                    css.height = $option.height();
-
-                    this.$typesHighlight.css(css);
-                }
-                else {
-                    $option.removeClass('selected');
-                }
-            }
-            this._enableDisableMoveButtons();
-        }
-    },
-    _setLevels(levels) {
-        if ( ! this.attached)
-            return;
-        this.$levelItems.off('click');
-        this.$levels.empty();
-
-        this.$moveUp.addClass('disabled');
-        this.$moveDown.addClass('disabled');
-
-        if (levels) {
-            for (let i = 0; i < levels.length; i++) {
-                let level = levels[i];
-                let $level = $('<div data-index="' + i + '", class="silky-variable-editor-level">' + level.label + '</div>').appendTo(this.$levels);
-                if (i === this.selectedLevelIndex)
-                    $level.addClass('selected');
-            }
-        }
-
-        this._enableDisableMoveButtons();
-
-        this.$levelItems = this.$levels.find('.silky-variable-editor-level');
-        this.$levelItems.on('click', event => {
-            this.$levelItems.removeClass('selected');
-            let $level = $(event.target);
-            $level.addClass('selected');
-
-            let index = this.$levelItems.index($level);
-            this.selectedLevelIndex = index;
-            this._enableDisableMoveButtons();
-        });
-    },
-    _setAutoMeasure(auto) {
-        if ( ! this.attached)
-            return;
-        if (auto)
-            this.$autoType.show();
-        else
-            this.$autoType.hide();
-    },
-    detach() {
-        this.model.apply();
-        this.attached = false;
-    },
-    attach() {
-        this.attached = true;
-        this.selectedLevelIndex = -1;
-        let name = this.model.get('name');
-        if (name !== this.$title.val())
-            this.$title.val(name);
-        this._setType(this.model.get('measureType'));
-        this._setAutoMeasure(this.model.get('autoMeasure'));
-        this._setLevels(this.model.get('levels'));
     }
 });
 

@@ -1,13 +1,13 @@
 
 'use strict';
 
-var _ = require('underscore');
-var Format = require('./format.js');
+const _ = require('underscore');
+const Format = require('./format.js');
 
-var FormatDef = {
+const FormatDef = {
 
     infer: function(raw) {
-        var typeName = typeof(raw);
+        let typeName = typeof(raw);
         switch (typeName) {
             case 'number':
             case 'string':
@@ -48,7 +48,7 @@ var FormatDef = {
             if (this.format === null)
                 return this.raw === value;
 
-            var temp = value.raw;
+            let temp = value.raw;
             if (_.isUndefined(temp))
                 temp = value;
             else if (this.format.name !== value.format.name)
@@ -64,8 +64,63 @@ var FormatDef = {
         this.isPrimitive = function() {
             return this.format !== null;
         };
+
+        this.convert = function(format) {
+            if (format.from === undefined)
+                throw 'Format "' + format.name + '" does not have a "from" converter function.';
+
+            return new FormatDef.constructor(format.from(this), format);
+        };
     }
 };
+
+FormatDef.variables = new Format({
+    name: 'variables',
+
+    default: null,
+
+    toString: function(raw) {
+        let r = '';
+        for (let i = 0; i < raw.length; i++) {
+            if (i > 0)
+                r = r + ', ';
+            r = r + raw[i];
+        }
+        return r;
+    },
+
+    parse: function(value) {
+        return value;
+    },
+
+    isValid: function(raw) {
+        return Array.isArray(raw);
+    },
+
+    isEqual: function(raw1, raw2, orderImportant) {
+        if (raw1.length !== raw2.length)
+            return false;
+
+        for (let i = 0; i < raw1.length; i++) {
+            let found = false;
+            if (orderImportant && raw1[i] === raw2[i])
+                found = true;
+            else {
+                for (let j = 0; j < raw2.length; j++) {
+                    if (raw1[i] === raw2[j])
+                        found = true;
+                }
+            }
+            if (found === false)
+                return false;
+        }
+        return true;
+    },
+
+    isEmpty: function(raw) {
+        return raw === null || raw.length === 0;
+    }
+});
 
 FormatDef.variable = new Format ({
 
@@ -93,22 +148,53 @@ FormatDef.variable = new Format ({
         return raw === null;
     },
 
-    interactions: function(variables) {
-        var list = [];
-        for (let i = 0; i < variables.length; i++) {
-            var listLength = list.length;
-            var rawVar = variables[i];
-            if (variables[i].raw)
-                rawVar = variables[i].raw;
+    interactions: function(values, minLength, maxLength) {
+
+        if (maxLength === undefined)
+            maxLength = -1;
+
+        if (minLength === undefined)
+            minLength = 1;
+
+        let counts = [0];
+        let findPosition = (length) => {
+            let pos = 0;
+            for (let k = 0; k < length; k++)
+                pos += counts[k];
+            return pos;
+        };
+
+        let list = [];
+        for (let i = 0; i < values.length; i++) {
+            let listLength = list.length;
+            let rawVar = values[i];
+            let isFormatted = false;
+            if (values[i].raw) {
+                rawVar = values[i].raw;
+                isFormatted = true;
+            }
 
             for (let j = 0; j < listLength; j++) {
-                var newVar = JSON.parse(JSON.stringify(list[j]));
+                let f = list[j];
+                if (maxLength > 1 && f.length === maxLength)
+                    break;
+
+                let newVar = JSON.parse(JSON.stringify(f));
 
                 newVar.push(rawVar);
-                list.push(FormatDef.constructor(newVar, FormatDef.term));
+
+                if (counts[newVar.length - 1] === undefined)
+                    counts[newVar.length - 1] = 1;
+                else
+                    counts[newVar.length - 1] += 1;
+                list.splice(findPosition(newVar.length), 0, isFormatted ? new FormatDef.constructor(newVar, FormatDef.term) : newVar);
             }
-            list.push(FormatDef.constructor([rawVar], FormatDef.term));
+            list.splice(i, 0, isFormatted ? new FormatDef.constructor([rawVar], FormatDef.term) : [rawVar]);
+            counts[0] += 1;
         }
+
+        if (minLength > 1)
+            list.splice(0, findPosition(minLength - 1));
 
         return list;
     }
@@ -142,15 +228,15 @@ FormatDef.term = new Format ({
 
     contains: function(raw, value) {
 
-        var type1 = typeof raw;
-        var type2 = typeof value;
+        let type1 = typeof raw;
+        let type2 = typeof value;
 
         if (type1 === 'string' && type2 === 'string')
             return raw === value;
         else if (type1 === 'string')
             return false;
 
-        for (var j = 0; j < raw.length; j++) {
+        for (let j = 0; j < raw.length; j++) {
 
             if (FormatDef.term.contains(raw[j], value))
                 return true;
@@ -159,10 +245,10 @@ FormatDef.term = new Format ({
         if (raw.length < value.length)
             return false;
 
-        var jStart = 0;
-        for (var i = 0; i < value.length; i++) {
-            var found = false;
-            for (var k = jStart; k < raw.length; k++) {
+        let jStart = 0;
+        for (let i = 0; i < value.length; i++) {
+            let found = false;
+            for (let k = jStart; k < raw.length; k++) {
                 if (FormatDef.term._areItemsEqual(value[i], raw[k])) {
                     if (jStart === k)
                         jStart = k + 1;
@@ -179,8 +265,8 @@ FormatDef.term = new Format ({
     },
 
     _areItemsEqual: function(item1, item2) {
-        var type1 = typeof item1;
-        var type2 = typeof item1;
+        let type1 = typeof item1;
+        let type2 = typeof item1;
 
         if (type1 !== type2)
             return false;
@@ -194,10 +280,10 @@ FormatDef.term = new Format ({
         if (item1.length !== item2.length)
             return false;
 
-        var jStart = 0;
-        for (var i = 0; i < item1.length; i++) {
-            var found = false;
-            for (var j = jStart; j < item2.length; j++) {
+        let jStart = 0;
+        for (let i = 0; i < item1.length; i++) {
+            let found = false;
+            for (let j = jStart; j < item2.length; j++) {
                 if (FormatDef.term._areItemsEqual(item1[i], item2[j])) {
                     if (j === jStart)
                         jStart = j + 1;
@@ -223,9 +309,12 @@ FormatDef.term = new Format ({
         if (typeof item === 'string')
             return item;
 
-        var joiner = FormatDef.term._getJoiner(level);
-        var combined = FormatDef.term._itemToString(item[0], level + 1);
-        for (var i = 1; i < item.length; i++)
+        if (item === null || item.length === 0)
+            return '';
+
+        let joiner = FormatDef.term._getJoiner(level);
+        let combined = FormatDef.term._itemToString(item[0], level + 1);
+        for (let i = 1; i < item.length; i++)
             combined = combined + " " + joiner + " " + FormatDef.term._itemToString(item[i], level + 1);
 
         return combined;
@@ -237,12 +326,27 @@ FormatDef.term = new Format ({
         else if (level > 2 || Array.isArray(item) === false || item.length === 0)
             return false;
 
-        for (var i = 0; i < item.length; i++) {
+        for (let i = 0; i < item.length; i++) {
             if (FormatDef.term._validateItem(item[i], level + 1) === false)
                 return false;
         }
 
         return true;
+    },
+
+    from: function(raw, format) {
+        if (format === undefined) {
+            format = raw.format;
+            raw = raw.raw;
+        }
+
+        if (format.name === 'term')
+            return raw;
+
+        if (format.name === 'variable')
+            return [raw];
+
+        return null;
     }
 });
 

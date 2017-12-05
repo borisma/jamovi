@@ -5,21 +5,36 @@ const electron = require('electron');
 const app = electron.app;
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 
-const marshallArgs = function(argv, wd, first) {
+process.on('uncaughtException', (e) => {
+    console.log(e);
+});
+
+const version = function() {
+    let versionPath = path.join(path.dirname(process.execPath), '..', 'Resources', 'jamovi', 'version');
+    try {
+        return fs.readFileSync(versionPath, { encoding: 'utf-8' }).trim();
+    }
+    catch(e) {
+        return '0.0.0.0';
+    }
+}
+
+const marshallArgs = function(args, wd, first) {
 
     let cmd = { first: first };
 
-    if (argv.length < 2) {
+    if (args.length < 1) {
         cmd.open = '';
     }
-    else if (argv[1] === '--version') {
-        console.log('0.0.0.0');
+    else if (args[0] === '--version') {
+        console.log(version());
         cmd.exit = true;
     }
-    else if (argv[1] === '--install') {
-        if (argv.length > 2) {
-            let p = path.resolve(wd, argv[2]);
+    else if (args[0] === '--install') {
+        if (args.length > 1) {
+            let p = path.resolve(wd, args[1]);
             if (fs.existsSync(p))
                 cmd.install = p;
             else
@@ -29,37 +44,62 @@ const marshallArgs = function(argv, wd, first) {
             cmd.error = 'You must specify a .jmo file to install';
         }
     }
-    else if (argv[1].startsWith('-psn')) {
+    else if (args[0].startsWith('-psn')) {
         // https://github.com/electron/electron/issues/3657
         cmd.open = '';
     }
     else {
-        cmd.open = path.resolve(wd, argv[1]);
+        cmd.open = path.resolve(wd, args[0]);
     }
 
     return cmd;
 }
 
-let argvCmd = marshallArgs(process.argv, '.', true)
+let argv = process.argv;
+let debug;
+if (argv.length >= 2 && argv[1] === '--py-debug') {
+    argv.shift(); // remove exe
+    argv.shift(); // remove --py-debug
+    let pth = path.join(os.homedir(), 'jamovi-log.txt');
+    debug = fs.createWriteStream(pth);
+
+    console.log('Logging to: ' + pth);
+    console.log();
+}
+else {
+    argv.shift(); // remove exe
+}
+
+let argvCmd = marshallArgs(argv, '.', true)
 if (argvCmd.error)
     console.log(argvCmd.error);
-if (argvCmd.exit)
+if (argvCmd.exit) {
     app.quit();
+    process.exit(0);
+}
 
 let alreadyRunning = app.makeSingleInstance((argv, wd) => {
+    argv.shift(); // remove exe
     let cmd = marshallArgs(argv, wd);
     handleCommand(cmd);
 });
 
-if (alreadyRunning)
-    app.quit()
+if (alreadyRunning) {
+    app.quit();
+    process.exit(0);
+}
+
+// proxy servers can interfere with accessing localhost
+app.commandLine.appendSwitch('no-proxy-server');
 
 const BrowserWindow = electron.BrowserWindow;
 const ipc = electron.ipcMain;
 const dialog = electron.dialog;
 const child_process = require('child_process');
+const { URL } = require('url');
 
 const ini = require('./ini');
+const tmp = require('./tmp');
 
 let confPath = path.join(path.dirname(process.execPath), 'env.conf');
 let content = fs.readFileSync(confPath, 'utf8');
@@ -69,6 +109,11 @@ let rootPath = path.resolve(path.dirname(process.execPath), conf.ENV.JAMOVI_CLIE
 let serverCMD = conf.ENV.JAMOVI_SERVER_CMD.split(' ')
 let cmd = path.resolve(path.dirname(process.execPath), serverCMD[0]);
 let args = serverCMD.slice(1);
+
+if (debug)
+    args.unshift('-vvv');
+
+global.version = version();
 
 let env = { };
 if (process.platform === 'linux') {
@@ -82,27 +127,74 @@ else if (process.platform === 'darwin') {
 }
 Object.assign(env, conf.ENV);
 
+let bin = path.dirname(process.execPath);
+
 for (let name in env) {
     // expand paths
-    if (name.endsWith('PATH') || name.endsWith('HOME')) {
+    if (name.endsWith('PATH') || name.endsWith('HOME') || name.endsWith('LIBS')) {
         let value = env[name];
         let paths = value.split(path.delimiter);
-        paths = paths.map(p => path.resolve(path.dirname(process.execPath), p));
+        paths = paths.map(p => path.resolve(bin, p));
         value = paths.join(path.delimiter);
         env[name] = value;
     }
 }
 
+const convertToPDF = function(path) {
+
+    let wind = new BrowserWindow({ width: 1280, height: 800, show: false });
+    wind.webContents.loadURL('file://' + path);
+
+    return new Promise((resolve, reject) => {
+
+        wind.webContents.once('did-finish-load', () => resolve());
+
+    }).then(() => {
+
+        return new Promise((resolve, reject) => {
+            wind.webContents.printToPDF({}, (err, data) => {
+                setTimeout(() => wind.close());
+                if (err)
+                    reject(err)
+                resolve(data);
+            });
+        });
+    }).then((data) => {
+
+        return new Promise((resolve, reject) => {
+            tmp.file({ postfix: '.pdf' }, (err, path, fd) => {
+                if (err)
+                    reject(err);
+                resolve({fd: fd, path: path, data: data});
+            });
+        });
+    }).then((obj) => {
+        return new Promise((resolve, reject) => {
+            fs.writeFile(obj.fd, obj.data, (err) => {
+                if (err)
+                    reject(err)
+                resolve(obj.path);
+            });
+        });
+    });
+}
+
 let server;
 let ports = null;
+let updateUrl;
 
 let spawn = new Promise((resolve, reject) => {
 
     server = child_process.spawn(cmd, args, { env: env, detached: true });
     // detached, because weird stuff happens on windows if not detached
 
-    let dataListener = chunk => {
-        console.log(chunk);
+    let dataListener = (chunk) => {
+
+        if (debug)
+            debug.write(chunk);
+        else
+            console.log(chunk);
+
         if (ports === null) {
             // the server sends back the ports it has opened through stdout
             ports = /ports: ([0-9]*), ([0-9]*), ([0-9]*)/.exec(chunk);
@@ -110,6 +202,38 @@ let spawn = new Promise((resolve, reject) => {
                 ports = ports.slice(1, 4);
                 ports = ports.map(x => parseInt(x));
                 resolve(ports);
+            }
+        }
+
+        let cmdRegex = /^request: ([a-z-]+) \(([0-9]+)\) ?(.*)\n?$/
+        let match = cmdRegex.exec(chunk)
+        if (match !== null) {
+            let id = match[2];
+            switch (match[1]) {
+            case 'convert-to-pdf':
+                match = /^"(.*)"$/.exec(match[3]);
+                if (match) {
+                    convertToPDF(match[1]).then((path) => {
+                        let response = 'response: convert-to-pdf (' + id + ') 1 "' + path + '"\n';
+                        server.stdin.write(response);
+                    }).catch((err) => {
+                        let response = 'response: convert-to-pdf (' + id + ') 0 "' + err + '"\n';
+                        server.stdin.write(response);
+                    });
+                }
+            case 'software-update':
+                match = /^"(.*)"$/.exec(match[3]);
+                if (match) {
+                    try {
+                        checkForUpdate(updateUrl, match[1]);
+                        let response = 'response: software-update (' + id + ') 1\n';
+                        server.stdin.write(response);
+                    }
+                    catch (e) {
+                        let response = 'response: software-update (' + id + ') 0 "' + e.message + '"\n';
+                        server.stdin.write(response);
+                    }
+                }
             }
         }
     };
@@ -126,6 +250,19 @@ let spawn = new Promise((resolve, reject) => {
     global.mainPort = ports[0];
     global.analysisUIPort = ports[1];
     global.resultsViewPort = ports[2];
+
+    let platform;
+    if (process.platform === 'darwin')
+        platform = 'macos';
+    else if (process.platform === 'win32')
+        platform = 'win64';
+    else
+        platform = 'linux';
+
+    updateUrl = 'https://www.jamovi.org/downloads/update?p=' + platform + '&v=' + global.version + '&f=zip';
+
+    setTimeout(() => checkForUpdate(updateUrl), 500);
+    setInterval(() => checkForUpdate(updateUrl, 'checking', false), 60 * 1000);
 
 }).catch(error => {
     console.log(error)
@@ -148,7 +285,7 @@ app.on('window-all-closed', () => app.quit());
 app.on('will-finish-launching', () => {
     // macOS file open events
     app.on('open-file', (event, path) => {
-        let cmd = { open: path };
+        let cmd = { open: decodeURI(path) };
         if (app.isReady())
             createWindow(cmd);
         else
@@ -175,6 +312,9 @@ ipc.on('request', (event, arg) => {
         if (wind.webContents === event.sender)
             break;
     }
+
+    if (wind === null)
+        return;
 
     let eventType = arg.type;
     let eventData = arg.data;
@@ -219,6 +359,18 @@ const handleCommand = function(cmd) {
 const createWindow = function(open) {
 
     let wind = new BrowserWindow({ width: 1280, height: 800, frame: process.platform !== 'win32' });
+
+    // as of electron 1.7.9 on linux, drag and drop from the fs to electron
+    // doesn't seem to work, the drop event is never fired. so we handle the
+    // navigate event here to achieve the same thing
+    wind.webContents.on('will-navigate', (event, url) => {
+        if ( ! url.startsWith(rootUrl)) {
+            let path = new URL(url).pathname;
+            createWindow({ open: path });
+            event.preventDefault();
+        }
+    });
+
     windows.push(wind);
 
     let url = rootUrl + 'index.html';
@@ -228,6 +380,11 @@ const createWindow = function(open) {
         url += '?open=' + path.resolve(open.open);
 
     wind.loadURL(url);
+
+    wind.webContents.on('new-window', function(e, url) {
+        e.preventDefault();
+        electron.shell.openExternal(url);
+    });
 
     let requests = wind.webContents.session.webRequest;
     requests.onBeforeRequest((details, callback) => {
@@ -248,3 +405,59 @@ const createWindow = function(open) {
         windows = windows.filter(w => w != wind);
     });
 };
+
+const updater = electron.autoUpdater;
+
+updater.on('error', () => {
+    notifyUpdateStatus('error');
+});
+
+updater.on('update-downloaded', () => {
+    notifyUpdateStatus('ready');
+});
+
+let lastUpdateCheck = new Date(0);
+
+const checkForUpdate = function(url, type='checking', force=true) {
+
+    if (process.platform !== 'darwin')  // only macOS for now
+        return;
+
+    let now = new Date()
+    if (force === false && (now - lastUpdateCheck) < 60 * 60 * 1000)
+        return;
+    lastUpdateCheck = now;
+
+    if (type === 'checking') {
+        const https = require('https');
+        let req = https.request(url);
+        req.end();
+        notifyUpdateStatus('checking');
+        req.on('response', (message) => {
+            if (message.statusCode === 204)
+                notifyUpdateStatus('uptodate');
+            else if (message.statusCode === 200)
+                notifyUpdateStatus('available');
+            else
+                notifyUpdateStatus('checkerror');
+        });
+        req.on('error', (error) => {
+            notifyUpdateStatus('checkerror');
+        });
+    }
+    else if (type === 'downloading') {
+        notifyUpdateStatus('downloading');
+        updater.setFeedURL(updateUrl);
+        updater.checkForUpdates();
+    }
+    else if (type === 'installing') {
+        updater.quitAndInstall();
+    }
+};
+
+const notifyUpdateStatus = function(status) {
+    setTimeout(() => {
+        let response = 'notification: update ' + status + '\n';
+        server.stdin.write(response);
+    });
+}

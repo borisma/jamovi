@@ -16,6 +16,18 @@ import os.path
 
 from enum import Enum
 
+cdef extern from "column.h":
+    cdef struct CLevelData "LevelData":
+        int value;
+        string label;
+        string importValue;
+    ctypedef enum CMeasureType  "MeasureType::Type":
+        CMeasureTypeNone        "MeasureType::NONE"
+        CMeasureTypeNominalText "MeasureType::NOMINAL_TEXT"
+        CMeasureTypeNominal     "MeasureType::NOMINAL"
+        CMeasureTypeOrdinal     "MeasureType::ORDINAL"
+        CMeasureTypeContinuous  "MeasureType::CONTINUOUS"
+
 cdef extern from "datasetw.h":
     cdef cppclass CDataSet "DataSetW":
         @staticmethod
@@ -25,8 +37,11 @@ cdef extern from "datasetw.h":
         int rowCount() const
         int columnCount() const
         CColumn appendColumn(const char *name, const char *importName) except +
+        CColumn insertColumn(int index, const char *name, const char *importName) except +
         void setRowCount(size_t count) except +
-        void appendRow() except +
+        void insertRows(int start, int end) except +
+        void deleteRows(int start, int end) except +
+        void deleteColumns(int start, int end) except +
         CColumn operator[](int index) except +
         CColumn operator[](const char *name) except +
         CColumn getColumnById(int id) except +
@@ -80,14 +95,6 @@ cdef class DataSet:
     def __iter__(self):
         return ColumnIterator(self)
 
-    def get_column_by_id(self, id):
-        cdef int _id
-
-        c = Column()
-        _id = id
-        c._this = deref(self._this).getColumnById(_id)
-        return c
-
     def append_column(self, name, import_name=None):
         c = Column()
         if import_name is None:
@@ -95,11 +102,24 @@ cdef class DataSet:
         c._this = self._this.appendColumn(name.encode('utf-8'), import_name.encode('utf-8'))
         return c
 
+    def insert_column(self, index, name, import_name=None):
+        c = Column()
+        if import_name is None:
+            import_name = name
+        c._this = self._this.insertColumn(index, name.encode('utf-8'), import_name.encode('utf-8'))
+        return c
+
     def set_row_count(self, count):
         self._this.setRowCount(count)
 
-    def append_row(self):
-        self._this.appendRow()
+    def insert_rows(self, row_start, row_end):
+        self._this.insertRows(row_start, row_end)
+
+    def delete_rows(self, row_start, row_end):
+        self._this.deleteRows(row_start, row_end)
+
+    def delete_columns(self, col_start, col_end):
+        self._this.deleteColumns(col_start, col_end)
 
     @property
     def row_count(self):
@@ -129,6 +149,9 @@ cdef extern from "columnw.h":
         void setName(const char *name)
         const char *importName() const
         int id() const
+        void setId(int id)
+        void setColumnType(CColumnType columnType)
+        CColumnType columnType() const
         void setMeasureType(CMeasureType measureType)
         CMeasureType measureType() const
         void setAutoMeasure(bool auto)
@@ -137,26 +160,34 @@ cdef extern from "columnw.h":
         void setValue[T](int index, T value)
         T value[T](int index)
         const char *getLabel(int value) const
+        const char *getImportValue(int value) const
         int valueForLabel(const char *label) const
+        void appendLevel(int value, const char *label, const char *importValue)
         void appendLevel(int value, const char *label)
+        void insertLevel(int value, const char *label, const char *importValue)
         void insertLevel(int value, const char *label)
         int levelCount() const
         bool hasLevel(const char *label) const
         bool hasLevel(int value) const
         void clearLevels()
-        vector[pair[int, string]] levels()
+        void updateLevelCounts()
+        const vector[CLevelData] levels()
         void setDPs(int dps)
         int dps() const
         int rowCount() const;
         int changes() const;
+        const char *formula() const;
+        void setFormula(const char *value);
+        const char *formulaMessage() const;
+        void setFormulaMessage(const char *value);
 
-cdef extern from "column.h":
-    ctypedef enum CMeasureType  "MeasureType::Type":
-        CMeasureTypeMisc        "MeasureType::MISC"
-        CMeasureTypeNominalText "MeasureType::NOMINAL_TEXT"
-        CMeasureTypeNominal     "MeasureType::NOMINAL"
-        CMeasureTypeOrdinal     "MeasureType::ORDINAL"
-        CMeasureTypeContinuous  "MeasureType::CONTINUOUS"
+
+
+    ctypedef enum CColumnType "ColumnType::Type":
+        CColumnTypeNone       "ColumnType::NONE"
+        CColumnTypeData       "ColumnType::DATA"
+        CColumnTypeComputed   "ColumnType::COMPUTED"
+        CColumnTypeRecoded    "ColumnType::RECODED"
 
 class CellIterator:
     def __init__(self, column):
@@ -169,12 +200,16 @@ class CellIterator:
         self._i += 1
         return c
 
+
 cdef class Column:
     cdef CColumn _this
 
     property id:
         def __get__(self):
-            return self._this.id()
+            return self._this.id();
+
+        def __set__(self, id):
+            self._this.setId(id)
 
     property name:
         def __get__(self):
@@ -187,6 +222,15 @@ cdef class Column:
     property import_name:
         def __get__(self):
             return self._this.importName().decode('utf-8')
+
+    property column_type:
+        def __get__(self):
+            return ColumnType(self._this.columnType())
+
+        def __set__(self, column_type):
+            if type(column_type) is ColumnType:
+                column_type = column_type.value
+            self._this.setColumnType(column_type)
 
     property measure_type:
         def __get__(self):
@@ -203,6 +247,26 @@ cdef class Column:
 
         def __set__(self, auto):
             self._this.setAutoMeasure(auto)
+
+    property formula:
+        def __get__(self):
+            fmla = self._this.formula()
+            if fmla is NULL:
+                return ''
+            return fmla.decode('utf-8')
+
+        def __set__(self, value):
+            self._this.setFormula(value.encode('utf-8'))
+
+    property formula_message:
+        def __get__(self):
+            fmla_msg = self._this.formulaMessage()
+            if fmla_msg is NULL:
+                return ''
+            return fmla_msg.decode('utf-8')
+
+        def __set__(self, value):
+            self._this.setFormulaMessage(value.encode('utf-8'))
 
     property dps:
         def __get__(self):
@@ -245,17 +309,24 @@ cdef class Column:
         else:
             self._this.append[int](value)
 
-    def append_level(self, raw, label):
-        self._this.appendLevel(raw, label.encode('utf-8'))
+    def append_level(self, raw, label, importValue=None):
+        if importValue is None:
+            importValue = label
+        self._this.appendLevel(raw, label.encode('utf-8'), importValue.encode('utf-8'))
 
-    def insert_level(self, raw, label):
-        self._this.insertLevel(raw, label.encode('utf-8'))
+    def insert_level(self, raw, label, importValue=None):
+        if importValue is None:
+            importValue = label
+        self._this.insertLevel(raw, label.encode('utf-8'), importValue.encode('utf-8'))
 
     def get_value_for_label(self, label):
         return self._this.valueForLabel(label.encode('utf-8'))
 
     def clear_levels(self):
         self._this.clearLevels()
+
+    def _update_level_counts(self):
+        self._this.updateLevelCounts()
 
     @property
     def has_levels(self):
@@ -282,7 +353,7 @@ cdef class Column:
         arr = [ ]
         levels = self._this.levels()
         for level in levels:
-            arr.append((level.first, level.second.decode('utf-8')))
+            arr.append((level.value, level.label.decode('utf-8'), level.importValue.decode('utf-8')))
         return arr
 
     @property
@@ -300,12 +371,20 @@ cdef class Column:
             self._this.setValue[int](index, -2147483648)
 
     def __setitem__(self, index, value):
+
+        if index >= self.row_count:
+            raise IndexError()
+
         if self.measure_type is MeasureType.CONTINUOUS:
             self._this.setValue[double](index, value)
         else:
             self._this.setValue[int](index, value)
 
     def __getitem__(self, index):
+
+        if index >= self.row_count:
+            raise IndexError()
+
         if self.measure_type == MeasureType.CONTINUOUS:
             return self._this.value[double](index)
         elif self.measure_type == MeasureType.NOMINAL_TEXT:
@@ -323,19 +402,37 @@ cdef class Column:
         else:
             return self._this.value[int](index)
 
-    def change(self, measure_type, name=None, levels=None, dps=None, auto_measure=None):
+    def change(self,
+        name=None,
+        column_type=None,
+        measure_type=None,
+        levels=None,
+        dps=None,
+        auto_measure=None,
+        formula=None):
 
         if name is not None:
             self.name = name
 
-        if type(measure_type) is not MeasureType:
-            measure_type = MeasureType(measure_type)
+        if column_type is not None:
+            if column_type is not ColumnType:
+                column_type = ColumnType(column_type)
+            self.column_type = column_type
 
         if dps is not None:
             self.dps = dps
 
         if auto_measure is not None:
             self.auto_measure = auto_measure
+
+        if formula is not None:
+            self.formula = formula
+
+        if measure_type is None:
+            return
+
+        if type(measure_type) is not MeasureType:
+            measure_type = MeasureType(measure_type)
 
         new_type = measure_type
         old_type = self.measure_type
@@ -366,22 +463,12 @@ cdef class Column:
                 self.measure_type = new_type
 
                 if levels is not None:
-                    old_levels = self.levels
-                    recode = { }
-                    for old_level in old_levels:
-                        for new_level in levels:
-                            if old_level[1] == new_level[1]:
-                                recode[old_level[0]] = new_level[0]
-                                break
 
                     self.clear_levels()
                     for level in levels:
-                        self.append_level(level[0], level[1])
+                        self.append_level(level[0], level[1], str(level[0]))
 
-                    for row_no in range(self.row_count):
-                        value = self._this.value[int](row_no)
-                        value = recode.get(value, -2147483648)
-                        self._this.setValue[int](row_no, value, True)
+                    self._update_level_counts()
 
             elif old_type == MeasureType.NOMINAL_TEXT or old_type == MeasureType.CONTINUOUS:
 
@@ -417,13 +504,13 @@ cdef class Column:
                     recode = { }
                     for old_level in old_levels:
                         for new_level in levels:
-                            if old_level[1] == new_level[1]:
+                            if old_level[2] == new_level[2]:
                                 recode[old_level[0]] = new_level[0]
                                 break
 
                     self.clear_levels()
                     for level in levels:
-                        self.append_level(level[0], level[1])
+                        self.append_level(level[0], level[1], level[2])
 
                     for row_no in range(self.row_count):
                         value = self._this.value[int](row_no)
@@ -495,6 +582,8 @@ cdef extern from "dirs.h":
         @staticmethod
         string documentsDir() except +
         @staticmethod
+        string downloadsDir() except +
+        @staticmethod
         string appDataDir() except +
         @staticmethod
         string tempDir() except +
@@ -510,17 +599,7 @@ cdef extern from "dirs.h":
 cdef class Dirs:
     @staticmethod
     def app_data_dir():
-
-        # CDirs.appDataDir() seems to have stopped working under macOS sierra,
-        # hence, us handling it here.
-
-        if platform.uname().system == 'Darwin':
-            path = os.path.expanduser('~/Library/Application Support/jamovi')
-            os.makedirs(path, exist_ok=True)
-            return path
-        else:
-            return decode(CDirs.appDataDir())
-
+        return decode(CDirs.appDataDir())
     @staticmethod
     def temp_dir():
         return decode(CDirs.tempDir())
@@ -530,6 +609,9 @@ cdef class Dirs:
     @staticmethod
     def documents_dir():
         return decode(CDirs.documentsDir())
+    @staticmethod
+    def downloads_dir():
+        return decode(CDirs.downloadsDir())
     @staticmethod
     def home_dir():
         return decode(CDirs.homeDir())
@@ -547,7 +629,7 @@ cdef class MemoryMap:
     cdef CMemoryMap *_this
 
     @staticmethod
-    def create(path, size=32768):
+    def create(path, size=4194304):
         mm = MemoryMap()
         mm._this = CMemoryMap.create(path.encode('utf-8'), size=size)
         return mm
@@ -562,8 +644,9 @@ cdef class MemoryMap:
 def decode(string str):
     return str.c_str().decode('utf-8')
 
+
 class MeasureType(Enum):
-    MISC         = CMeasureTypeMisc
+    NONE         = CMeasureTypeNone
     NOMINAL_TEXT = CMeasureTypeNominalText
     NOMINAL      = CMeasureTypeNominal
     ORDINAL      = CMeasureTypeOrdinal
@@ -580,7 +663,7 @@ class MeasureType(Enum):
         elif measure_type == MeasureType.NOMINAL_TEXT:
             return "NominalText"
         else:
-            return "Misc"
+            return "None"
 
     @staticmethod
     def parse(measure_type):
@@ -593,7 +676,39 @@ class MeasureType(Enum):
         elif measure_type == "NominalText":
             return MeasureType.NOMINAL_TEXT
         else:
-            return MeasureType.MISC
+            return MeasureType.NONE
+
+class ColumnType(Enum):
+    NONE     = CColumnTypeNone
+    DATA     = CColumnTypeData
+    COMPUTED = CColumnTypeComputed
+    RECODED  = CColumnTypeRecoded
+
+    @staticmethod
+    def stringify(value):
+        if value == ColumnType.DATA:
+            return 'Data'
+        elif value == ColumnType.COMPUTED:
+            return 'Computed'
+        elif value == ColumnType.RECODED:
+            return 'Recoded'
+        elif value == ColumnType.NONE:
+            return 'None'
+        else:
+            return 'Data'
+
+    @staticmethod
+    def parse(value):
+        if value == 'Data':
+            return ColumnType.DATA
+        elif value == 'Computed':
+            return ColumnType.COMPUTED
+        elif value == 'Recoded':
+            return ColumnType.RECODED
+        elif value == 'None':
+            return ColumnType.NONE
+        else:
+            return ColumnType.DATA
 
 cdef extern from "platforminfo.h":
     cdef cppclass CPlatformInfo "PlatformInfo":

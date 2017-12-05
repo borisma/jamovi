@@ -2,27 +2,31 @@
 
 'use strict';
 
-var _ = require('underscore');
-var $ = require('jquery');
-var Backbone = require('backbone');
+const _ = require('underscore');
+const $ = require('jquery');
+const Backbone = require('backbone');
 const Framesg = require('framesg').default;
 Backbone.$ = $;
 
-var Options = require('./options');
-var OptionsView = require('./optionsview');
-var ui = require('./layoutdef');
-var Format = require('./format.js');
-var FormatDef = require('./formatdef');
-var DefaultControls = require('./defaultcontrols');
-var View = require('./actions');
-var ListItemControl = require('./listitemcontrol');
-var LayoutActionManager = require('./layoutactionmanager');
+const Options = require('./options');
+const OptionsView = require('./optionsview');
+const ui = require('./layoutdef');
+const Format = require('./format.js');
+const FormatDef = require('./formatdef');
+const DefaultControls = require('./defaultcontrols');
+const LayoutUpdateCheck = require('./layoutupdatecheck');
+const View = require('./actions');
+const GridTargetControl = require('./gridtargetcontrol');
+const GridControl = require('./gridcontrol');
+const OptionControl = require('./optioncontrol');
+const GridOptionControl = require('./gridoptioncontrol');
+const LayoutActionManager = require('./layoutactionmanager');
 const RequestDataSupport = require('./requestdatasupport');
-
+const GridOptionListControl = require('./gridoptionlistcontrol');
 
 window._ = _;
 
-var frameCommsApi = {
+const frameCommsApi = {
     setOptionsDefinition: loadAnalysis,
 
     dataChanged: data => {
@@ -63,7 +67,7 @@ var requestData = function(requestType, requestData, getRemote) {
 };
 
 var requestLocalColumnData = function(data) {
-    var columns = dataResources.columns;
+    var columns = dataResources.columns.concat(analysis.viewTemplate.customVariables);
     let found = false;
     let foundAll = true;
     for (let i = 0; i < columns.length; i++) {
@@ -90,17 +94,27 @@ var requestLocalColumnData = function(data) {
 var dataResources = { columns: [] };
 
 
-var Analysis = function(def) {
+const Analysis = function(def) {
 
     eval(def);
 
-    var options = module.exports.options;
+    let options = module.exports.options;
 
-    var layoutDef = new module.exports.view.layout();
+    let layoutDef = new module.exports.view.layout();
     this.viewTemplate = new module.exports.view();
+
+    LayoutUpdateCheck(layoutDef);
+
     this.viewTemplate.setRequestedDataSource(this);
-    var actionManager = new LayoutActionManager(this.viewTemplate);
-    var optionsManager = new Options(options);
+
+    this.viewTemplate.on("customVariablesChanged", (event) => {
+        setTimeout(() => {
+            this.dataChanged(event);
+        }, 0);
+    });
+
+    let actionManager = new LayoutActionManager(this.viewTemplate);
+    let optionsManager = new Options(options);
     actionManager.onExecutingStateChanged = function(state) {
         if (state)
             optionsManager.beginEdit();

@@ -5,6 +5,9 @@ import tornado.httpserver
 
 from tornado.web import RequestHandler
 from tornado.web import StaticFileHandler
+from tornado.web import stream_request_body
+from tornado.concurrent import Future
+from tornado import gen
 
 from .clientconnection import ClientConnection
 from .instance import Instance
@@ -15,6 +18,7 @@ import sys
 import os.path
 import uuid
 import mimetypes
+import re
 
 import tempfile
 import logging
@@ -61,7 +65,13 @@ class ResourceHandler(RequestHandler):
 
         resource_path = instance.get_path_to_resource(resource_id)
 
+        mt = mimetypes.guess_type(resource_id)
+
         with open(resource_path, 'rb') as file:
+            if mt[0] is not None:
+                self.set_header('Content-Type', mt[0])
+            if mt[1] is not None:
+                self.set_header('Content-Encoding', mt[1])
             content = file.read()
             self.write(content)
 
@@ -158,9 +168,47 @@ class SFHandler(StaticFileHandler):
             self.set_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
 
 
+@stream_request_body
+class PDFConverter(RequestHandler):
+
+    def initialize(self, pdfservice):
+        self._pdfservice = pdfservice
+        self._file = None
+
+    def prepare(self):
+        self._file = tempfile.NamedTemporaryFile()
+
+    def data_received(self, data):
+        self._file.write(data)
+
+    @gen.coroutine
+    def post(self):
+        self._file.flush()
+        try:
+            pdf_path = yield self._pdfify()
+            with open(pdf_path, 'rb') as file:
+                content = file.read()
+                self.set_header('Content-Type', 'application/pdf')
+                self.write(content)
+        except Exception as e:
+            self.set_status(500)
+            self.write(str(e))
+
+    def _pdfify(self):
+        self._future = Future()
+        self._pdfservice._request({
+            'cmd': 'convert-to-pdf',
+            'args': [ self._file.name ],
+            'waiting': self._future })
+        return self._future
+
+
 class Server:
 
-    def __init__(self, port, debug=False):
+    ETRON_RESP_REGEX = re.compile('^response: ([a-z-]+) \(([0-9]+)\) ([10]) ?"(.*)"\n?$')
+    ETRON_NOTF_REGEX = re.compile('^notification: ([a-z-]+) ?(.*)\n?$')
+
+    def __init__(self, port, host='127.0.0.1', slave=False, stdin_slave=False, debug=False):
 
         if port == 0:
             self._ports = [ 0, 0, 0 ]
@@ -169,23 +217,74 @@ class Server:
 
         self._ioloop = tornado.ioloop.IOLoop.instance()
 
+        self._host = host
+        self._slave = slave and not stdin_slave
+        self._stdin_slave = stdin_slave
         self._debug = debug
         self._ports_opened_listeners = [ ]
 
-        self._thread = threading.Thread(target=self._read_stdin)
-        self._thread.start()
+        if stdin_slave:
+            self._thread = threading.Thread(target=self._read_stdin)
+            self._thread.start()
+
+        self._etron_reqs = [ ]
+        self._etron_req_id = 0
+
+        Instance.set_update_request_handler(self._set_update_status)
+
+    def _set_update_status(self, status):
+        self._request({
+            'cmd': 'software-update',
+            'args': [ status ] })
+
+    def _request(self, request):
+        request['id'] = str(self._etron_req_id)
+        self._etron_req_id += 1
+        self._etron_reqs.append(request)
+        cmd = 'request: {} ({}) "{}"\n'.format(
+            request['cmd'],
+            request['id'],
+            request['args'][0])
+        sys.stdout.write(cmd)
+        sys.stdout.flush()
 
     def add_ports_opened_listener(self, listener):
         self._ports_opened_listeners.append(listener)
 
     def _read_stdin(self):
         ioloop = tornado.ioloop.IOLoop.instance()
-        for line in sys.stdin:
-            line = line.strip()
-            ioloop.add_callback(self._stdin, line)
+        try:
+            for line in sys.stdin:
+                line = line.strip()
+                ioloop.add_callback(self._stdin, line)
+        except OSError:
+            pass
         ioloop.add_callback(self.stop)
 
     def _stdin(self, line):
+
+        match = Server.ETRON_RESP_REGEX.match(line)
+
+        if match:
+            id = match.group(2)
+            for request in self._etron_reqs:
+                if request['id'] == id:
+                    if match.group(3) == '1':
+                        request['waiting'].set_result(match.group(4))
+                    else:
+                        request['waiting'].set_exception(RuntimeError(match.group(4)))
+                    self._etron_reqs.remove(request)
+                    return
+
+        match = Server.ETRON_NOTF_REGEX.match(line)
+
+        if match:
+            notification_type = match.group(1)
+            notification_message = match.group(2)
+            if notification_type == 'update':
+                Instance.set_update_status(notification_message)
+            return
+
         if line.startswith('install: '):
             path = line[9:]
             Modules.instance().install(path, lambda t, res: None)
@@ -194,7 +293,12 @@ class Server:
                     instance._on_settings()
                     instance.rerun()
         else:
-            print(line)
+            sys.stderr.write(line)
+            sys.stderr.flush()
+
+    def _lonely_suicide(self):
+        if len(Instance.instances) == 0:
+            self.stop()
 
     def stop(self):
         tornado.ioloop.IOLoop.instance().stop()
@@ -202,12 +306,14 @@ class Server:
     def start(self):
 
         client_path = conf.get('client_path')
+        version_path = os.path.join(conf.get('home'), 'Resources', 'jamovi', 'version')
         coms_path   = 'jamovi.proto'
 
         session_dir = tempfile.TemporaryDirectory()
         session_path = session_dir.name
 
         self._main_app = tornado.web.Application([
+            (r'/version', SingleFileHandler, { 'path': version_path }),
             (r'/login', LoginHandler),
             (r'/coms', ClientConnection, { 'session_path': session_path }),
             (r'/upload', UploadHandler),
@@ -218,6 +324,7 @@ class Server:
                 'no_cache': self._debug }),
             (r'/analyses/(.*)/(.*)/(.*)', AnalysisDescriptor),
             (r'/analyses/(.*)/(.*)()', AnalysisDescriptor),
+            (r'/utils/to-pdf', PDFConverter, { 'pdfservice': self }),
             (r'/(.*)', SFHandler, {
                 'path': client_path,
                 'default_filename': 'index.html',
@@ -230,7 +337,9 @@ class Server:
         assets_path = os.path.join(client_path, 'assets')
 
         self._analysisui_app = tornado.web.Application([
-            (r'/.*/', SingleFileHandler, { 'path': analysisui_path }),
+            (r'/.*/', SingleFileHandler, {
+                'path': analysisui_path,
+                'no_cache': True }),
             (r'/.*/analysisui.js',  SingleFileHandler, {
                 'path': analysisuijs_path,
                 'mime_type': 'text/javascript',
@@ -259,23 +368,27 @@ class Server:
             (r'/(.*)/(.*)/module/(.*)', ModuleAssetHandler),
         ])
 
-        sockets = tornado.netutil.bind_sockets(self._ports[0], 'localhost')
+        sockets = tornado.netutil.bind_sockets(self._ports[0], self._host)
         server = tornado.httpserver.HTTPServer(self._main_app)
         server.add_sockets(sockets)
         self._ports[0] = sockets[0].getsockname()[1]
 
-        sockets = tornado.netutil.bind_sockets(self._ports[1], 'localhost')
+        sockets = tornado.netutil.bind_sockets(self._ports[1], self._host)
         server = tornado.httpserver.HTTPServer(self._analysisui_app)
         server.add_sockets(sockets)
         self._ports[1] = sockets[0].getsockname()[1]
 
-        sockets = tornado.netutil.bind_sockets(self._ports[2], 'localhost')
+        sockets = tornado.netutil.bind_sockets(self._ports[2], self._host)
         server = tornado.httpserver.HTTPServer(self._resultsview_app)
         server.add_sockets(sockets)
         self._ports[2] = sockets[0].getsockname()[1]
 
         for listener in self._ports_opened_listeners:
             listener(self._ports)
+
+        if self._slave:
+            check = tornado.ioloop.PeriodicCallback(self._lonely_suicide, 1000)
+            self._ioloop.call_later(3, check.start)
 
         try:
             self._ioloop.start()

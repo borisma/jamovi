@@ -14,8 +14,10 @@ const host = require('./host');
 const Notify = require('./notification');
 
 const Analyses = require('./analyses');
-const DataSetViewModel = require('./dataset').DataSetViewModel;
+const DataSetViewModel = require('./dataset');
 const OptionsPB = require('./optionspb');
+
+const Settings = require('./settings');
 
 const Instance = Backbone.Model.extend({
 
@@ -25,6 +27,8 @@ const Instance = Backbone.Model.extend({
         this.command = '';
         this.seqNo = 0;
 
+        this._settings = new Settings({ coms: this.attributes.coms });
+
         this._dataSetModel = new DataSetViewModel({ coms: this.attributes.coms });
         this._dataSetModel.on('columnsChanged', this._columnsChanged, this);
 
@@ -32,6 +36,8 @@ const Instance = Backbone.Model.extend({
         this._analyses.set('dataSetModel', this._dataSetModel);
         this._analyses.on('analysisCreated', this._analysisCreated, this);
         this._analyses.on('analysisOptionsChanged', this._runAnalysis, this);
+
+        this._settings.on('change:theme', event => this._themeChanged());
 
         this._instanceId = null;
 
@@ -44,6 +50,7 @@ const Instance = Backbone.Model.extend({
         this._analyses.off('analysisCreated', this._analysisCreated, this);
         this._analyses.off('analysisOptionsChanged', this._runAnalysis, this);
         this.attributes.coms.off('broadcast', this._onBC);
+        this._settings.destroy();
     },
     defaults : {
         coms : null,
@@ -51,19 +58,21 @@ const Instance = Backbone.Model.extend({
         hasDataSet : false,
         path : null,
         title : '',
-        resultsMode : 'rich',
         blank : false,
+        importPath : '',
+        resultsSupplier: null,
     },
     instanceId() {
         return this._instanceId;
     },
     dataSetModel() {
-
         return this._dataSetModel;
     },
     analyses() {
-
         return this._analyses;
+    },
+    settings() {
+        return this._settings;
     },
     connect(instanceId) {
 
@@ -73,9 +82,9 @@ const Instance = Backbone.Model.extend({
 
             return this._beginInstance(instanceId);
 
-        }).then(instanceId => {
+        }).then(() => {
 
-            this._instanceId = instanceId;
+            return this._settings.retrieve(this._instanceId);
 
         }).then(() => {
 
@@ -120,7 +129,11 @@ const Instance = Backbone.Model.extend({
             request.instanceId = this._instanceId;
 
             let onresolve = (response) => {
+
+                let info = coms.Messages.OpenProgress.decode(response.payload);
+                let filePath = info.path;
                 let ext = path.extname(filePath);
+                
                 this.set('path', filePath);
                 this.set('title', path.basename(filePath, ext));
                 this._retrieveInfo();
@@ -140,47 +153,119 @@ const Instance = Backbone.Model.extend({
 
         return promise;
     },
-    save(filePath, overwrite) {
+    save(filePath, options, overwrite, recursed) {  // recursed argument is a hack
 
+        if (options === undefined)
+            options = { export: false, part: '' };
+        if (options.name === undefined)
+            options.name = 'Element';
+        if (options.export === undefined)
+            options.export = false;
+        if (options.part === undefined)
+            options.part = '';
+        if (options.format === undefined)
+            options.format = '';
         if (overwrite === undefined)
             overwrite = false;
 
         let coms = this.attributes.coms;
 
-        let save = new coms.Messages.SaveRequest(filePath, overwrite);
-        let request = new coms.Messages.ComsMessage();
-        request.payload = save.toArrayBuffer();
-        request.payloadType = "SaveRequest";
-        request.instanceId = this._instanceId;
+        return Promise.resolve().then(() => {
 
-        return new Promise((resolve, reject) => {
-            coms.send(request).then((response) => {
-                let info = coms.Messages.SaveProgress.decode(response.payload);
-                if (info.success) {
+            return host.nameAndVersion;
+
+        }).then(app => {
+
+            // Generate content if necessary
+
+            if (options.content) {
+                return options.content;
+            }
+            else if (options.partType === 'image') {
+                // images are handled specially below
+                return undefined;
+            }
+            else if (filePath.endsWith('.omv')) {
+                return this.attributes.resultsSupplier.getAsHTML({images:'relative', generator:app});
+            }
+            else if (filePath.endsWith('.html')) {
+                return this.attributes.resultsSupplier.getAsHTML({images:'inline', generator:app}, options.part);
+            }
+            else if (filePath.endsWith('.pdf')) {
+                return this.attributes.resultsSupplier.getAsHTML({images:'absolute', generator:app}, options.part)
+                    .then(html => this._requestPDF(html));
+            }
+            else {
+                return undefined;
+            }
+
+        }).then(content => {
+
+            // Send the save request
+
+            let save = new coms.Messages.SaveRequest(
+                filePath,
+                overwrite,
+                options.export,
+                options.part,
+                options.format);
+
+            if (content) {
+                if (typeof content === 'string')
+                    content = new TextEncoder('utf-8').encode(content);
+                save.incContent = true;
+                save.content = content;
+                options.content = content;
+            }
+
+            let request = new coms.Messages.ComsMessage();
+            request.payload = save.toArrayBuffer();
+            request.payloadType = 'SaveRequest';
+            request.instanceId = this._instanceId;
+
+            return coms.send(request)
+                .catch((err) => { throw err.cause; });
+
+        }).then(response => {
+
+            // Handle the response
+
+            let info = coms.Messages.SaveProgress.decode(response.payload);
+            if (info.success) {
+                if (options.export) {
+                    return { message: "Exported", cause: "Exported to '" + path.basename(filePath) + "'" };
+                }
+                else {
+                    if (info.path)
+                        filePath = info.path;
                     let ext = path.extname(filePath);
                     this.set('path', filePath);
                     this.set('title', path.basename(filePath, ext));
-                    resolve(response);
-                    this._notify({ message: "File Saved", cause: "Your data and results have been saved to '" + path.basename(filePath) + "'" });
                     this._dataSetModel.set('edited', false);
+                    return { message: "File Saved", cause: "Saved to '" + path.basename(filePath) + "'" };
+                }
+            }
+            else {
+                if (overwrite === false && info.fileExists) {
+                    let response = window.confirm("The file '" + path.basename(filePath) + "' already exists. Overwrite this file?", 'Confirm overwite');
+                    if (response)
+                        return this.save(filePath, options, true, true);
+                    else
+                        return Promise.reject();  // cancelled
                 }
                 else {
-                    if (overwrite === false && info.fileExists) {
-                        let response = window.confirm("The file '" + path.basename(filePath) + "' already exists. Do you want to overwrite this file?", 'Confirm overwite');
-                        if (response)
-                            this.save(filePath, true).then((response) => resolve(response), (reason) => reject(reason) );
-                        else
-                            reject("File overwrite cancelled.");
-                    }
-                    else {
-                        reject("File save failed.");
-                    }
+                    Promise.reject("File save failed.");
                 }
+            }
 
-            }).catch(error => {
-                reject("File save failed.");
-                this._notify(error);
-            });
+        }).then(message => {  // this stuff should get moved to the caller (so we can call this recursively)
+            if ( ! recursed && message) // hack!
+                this._notify(message);
+            return message;
+        }).catch(error => {
+            if ( ! recursed && error) // if not cancelled
+                this._notify({ message: 'Save failed', cause: error, type: 'error' });
+            throw error;
         });
     },
     browse(filePath) {
@@ -192,20 +277,11 @@ const Instance = Backbone.Model.extend({
 
         let message = new coms.Messages.ComsMessage();
         message.payload = fs.toArrayBuffer();
-        message.payloadType = "FSRequest";
+        message.payloadType = 'FSRequest';
         message.instanceId = this.instanceId();
 
         return coms.send(message)
             .then(response => coms.Messages.FSResponse.decode(response.payload));
-    },
-    toggleResultsMode() {
-
-        let mode = this.attributes.resultsMode;
-        if (mode === 'text')
-            mode = 'rich';
-        else
-            mode = 'text';
-        this.set('resultsMode', mode);
     },
     restartEngines() {
 
@@ -245,13 +321,13 @@ const Instance = Backbone.Model.extend({
 
         let coms = this.attributes.coms;
 
-        let moduleRequest = new coms.Messages.ModuleRequest();
-        moduleRequest.command = coms.Messages.ModuleRequest.ModuleCommand.INSTALL;
+        let moduleRequest = new coms.Messages.ModuleRR();
+        moduleRequest.command = coms.Messages.ModuleRR.ModuleCommand.INSTALL;
         moduleRequest.path = filePath;
 
         let request = new coms.Messages.ComsMessage();
         request.payload = moduleRequest.toArrayBuffer();
-        request.payloadType = 'ModuleRequest';
+        request.payloadType = 'ModuleRR';
         request.instanceId = this._instanceId;
 
         return coms.send(request)
@@ -264,22 +340,27 @@ const Instance = Backbone.Model.extend({
 
         let coms = this.attributes.coms;
 
-        let moduleRequest = new coms.Messages.ModuleRequest();
-        moduleRequest.command = coms.Messages.ModuleRequest.ModuleCommand.UNINSTALL;
+        let moduleRequest = new coms.Messages.ModuleRR();
+        moduleRequest.command = coms.Messages.ModuleRR.ModuleCommand.UNINSTALL;
         moduleRequest.name = name;
 
         let request = new coms.Messages.ComsMessage();
         request.payload = moduleRequest.toArrayBuffer();
-        request.payloadType = 'ModuleRequest';
+        request.payloadType = 'ModuleRR';
         request.instanceId = this._instanceId;
 
         return coms.send(request);
+    },
+    _themeChanged() {
+        for (let analysis of this.analyses())
+            this._runAnalysis(analysis, 'theme');
     },
     _notify(error) {
         let notification = new Notify({
             title: error.message,
             message: error.cause,
             duration: 3000,
+            type: error.type ? error.type : 'info',
         });
         this.trigger('notification', notification);
     },
@@ -296,7 +377,7 @@ const Instance = Backbone.Model.extend({
             request.instanceId = instanceId;
 
         return coms.send(request).then(response => {
-            return response.instanceId;
+            this._instanceId = response.instanceId;
         });
     },
     _retrieveInfo() {
@@ -321,6 +402,7 @@ const Instance = Backbone.Model.extend({
                 this.set('title', info.title);
                 this.set('path',  info.path);
                 this.set('blank', info.blank);
+                this.set('importPath', info.importPath);
             }
 
             for (let analysis of info.analyses) {
@@ -352,6 +434,8 @@ const Instance = Backbone.Model.extend({
         let coms = this.attributes.coms;
         let ppi = parseInt(72 * (window.devicePixelRatio || 1));
 
+        let theme = this._settings.getSetting('theme', 'default');
+
         let analysisRequest = new coms.Messages.AnalysisRequest();
         analysisRequest.analysisId = analysis.id;
         analysisRequest.name = analysis.name;
@@ -361,13 +445,14 @@ const Instance = Backbone.Model.extend({
         if (changed)
             analysisRequest.changed = changed;
 
+        let options = { };
         if (analysis.isReady)
-            analysisRequest.setOptions(OptionsPB.toPB(analysis.options, ppi, coms.Messages));
-        else
-            analysisRequest.setOptions(OptionsPB.toPB({ }, ppi, coms.Messages));
+            options = analysis.options;
+
+        analysisRequest.setOptions(OptionsPB.toPB(options, { '.ppi' : ppi, 'theme' : theme }, coms.Messages));
 
         if (analysis.deleted)
-            analysisRequest.perform = 6; // delete
+            analysisRequest.perform = 6; // DELETE
 
         let request = new coms.Messages.ComsMessage();
         request.payload = analysisRequest.toArrayBuffer();
@@ -382,25 +467,30 @@ const Instance = Backbone.Model.extend({
 
         if (message.payloadType === 'AnalysisResponse') {
             let response = coms.Messages.AnalysisResponse.decode(message.payload);
-            let ok = false;
 
             let id = response.analysisId;
             let analysis = this._analyses.get(id);
 
-            if (analysis.isReady === false && _.has(response, "options")) {
+            if (analysis.isReady === false && response.options)
                 analysis.setup(OptionsPB.fromPB(response.options, coms.Messages));
-                ok = true;
-            }
 
-            if (analysis.isReady && _.has(response, "results") && response.results !== null) {
+            if (response.results)
                 analysis.setResults(response.results, response.incAsText, response.syntax);
-                ok = true;
+        }
+        else if (message.payloadType === 'ModuleRR') {
+            let response = coms.Messages.ModuleRR.decode(message.payload);
+            let moduleName = response.name;
+
+            for (let analysis of this._analyses) {
+                if (analysis.ns === moduleName)
+                    analysis.reload();
             }
 
-            if (ok === false) {
-                console.log("Unexpected analysis results received");
-                console.log(response);
-            }
+            this.trigger('moduleInstalled', { name: moduleName });
+        }
+        else if (message.payloadType === 'LogRR') {
+            let log = coms.Messages.LogRR.decode(message.payload);
+            console.log(log.content);
         }
     },
     _columnsChanged(event) {
@@ -410,26 +500,39 @@ const Instance = Backbone.Model.extend({
         for (let analysis of this._analyses) {
             let using = analysis.getUsing();
 
-            let changeFound = false;
+            let columnDataChanged = false;
+            let columnDeleted = false;
+            let columnRenamed = false;
             let columnRenames = [];
+            let columnDeletes = [];
+
             for (let changes of event.changes) {
-                let column = this._dataSetModel.getColumnById(changes.id);
-                let name = column.name;
-                if (changes.nameChanged)
-                    name = changes.oldName;
-                if (using.includes(name)) {
-                    if (changes.nameChanged)
+
+                if (changes.deleted) {
+                    if (using.includes(changes.name)) {
+                        columnDeleted = true;
+                        columnDeletes.push(changes.name);
+                    }
+                }
+                else {
+                    let column = this._dataSetModel.getColumnById(changes.id);
+                    if (using.includes(column.name))
+                        columnDataChanged = true;
+                    if (changes.nameChanged && using.includes(changes.oldName)) {
+                        columnRenamed = true;
                         columnRenames.push({ oldName: changes.oldName, newName: column.name });
-                    changeFound = true;
+                    }
                 }
             }
-            if (changeFound) {
-                if (columnRenames.length > 0) {
-                    analysis.renameColumns(columnRenames);
-                    let selectedAnalysis = this.get('selectedAnalysis');
-                    if (selectedAnalysis !== null && selectedAnalysis.id === analysis.id)
-                        this.trigger("change:selectedAnalysis", { changed: { selectedAnalysis: analysis } });
-                }
+
+            if (columnRenamed)
+                analysis.renameColumns(columnRenames);
+
+
+            if (columnDataChanged || columnRenamed || columnDeleted) {
+                let selectedAnalysis = this.get('selectedAnalysis');
+                if (selectedAnalysis !== null && selectedAnalysis.id === analysis.id)
+                    this.trigger("change:selectedAnalysis", { changed: { selectedAnalysis: analysis } });
                 this._runAnalysis(analysis, event.changed);
             }
         }
@@ -447,7 +550,28 @@ const Instance = Backbone.Model.extend({
             default:
                 return '';
         }
-    }
+    },
+    _requestPDF(html) {
+        return new Promise((resolve, reject) => {
+
+            let url = host.baseUrl + 'utils/to-pdf';
+            let xhr = new XMLHttpRequest();  // jQuery doesn't support binary!
+            xhr.open('POST', url);
+            xhr.send(html);
+            xhr.responseType = 'arraybuffer';
+            xhr.onload = function(e) {
+                if (this.status === 200)
+                    resolve(this.response);
+                if (this.status === 500)
+                    reject(this.responseText);
+                else
+                    reject(this.statusText);
+            };
+            xhr.onerror = function(e) {
+                reject(e);
+            };
+        });
+    },
 });
 
 module.exports = Instance;

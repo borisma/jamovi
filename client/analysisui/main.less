@@ -1,18 +1,4 @@
 
-@import (inline) "../lib/metro-icons.css";
-@import (inline) "controlcontainer.css";
-@import (inline) "optionlistcontrol.css";
-@import (inline) "layoutgroupview.css";
-@import (inline) "layoutvariablesview.css";
-@import (inline) "layoutcollapseview.css";
-@import (inline) "gridcheckbox.css";
-@import (inline) "gridradiobutton.css";
-@import (inline) "gridtextbox.css";
-@import (inline) "gridcombobox.css";
-@import (inline) "rmanovafactorscontrol.css";
-@import (inline) "gridvariablestargetlist.css";
-@import (inline) "gridtargetlist.css";
-
 
 * {
     user-select: none ;
@@ -29,13 +15,13 @@ html, body {
 }
 
 body {
+    cursor: default ;
+
     font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji","Segoe UI Symbol";
-    font-size: 0.875rem;
+    font-size: 80%;
     line-height: 1.1;
     font-weight: 400;
     font-style: normal;
-
-    cursor: default ;
 }
 
 h1 {
@@ -47,32 +33,29 @@ h1 {
 }
 
 .silky-layout-cell.cell-border:not(.first-cell) {
-    border-left: 1px solid rgb(130, 130, 130);
+    border-left: 1px solid #d8d8d8;
 }
 
 .silky-layout-cell.cell-border-columns:not(.first-cell) {
-    border-left: 1px solid rgb(130, 130, 130);
+    border-left: 1px solid #d8d8d8;
 }
 
 .silky-layout-cell.cell-border:not(.first-row) {
-    border-top: 1px solid rgb(130, 130, 130);
+    border-top: 1px solid #d8d8d8;
 }
 
 .silky-layout-cell.cell-border-rows:not(.first-row) {
-    border-top: 1px solid rgb(130, 130, 130);
+    border-top: 1px solid #d8d8d8;
 }
 
 .silky-layout-cell.selected {
     background-color: #B5CAEF;
 }
 
-.silky-option-list-header {
-    font-weight: bold;
-    margin: 5px;
-}
-
-.silky-list-item-label {
-    margin: 2px 5px 2px 5px;
+.hasStretchFactor {
+    border-style: solid;
+    border-width: 1px;
+    border-color: red;
 }
 
 .silky-list-item-textbox {
@@ -154,41 +137,33 @@ h1 {
     padding-left: 5px;
     padding-top: 3px;
     padding-bottom: 3px;
-    vertical-align: middle ;
-}
-
-.rma-cell-measure-ctrl .silky-format-variable {
-    font-size: 100% ;
-    padding-left: 5px;
-    padding-top: 3px;
-    padding-bottom: 0px;
-    vertical-align: middle ;
-}
-
-.rma-cell-measure-ctrl .silky-format-rma-cell {
-    font-size: 80% ;
     padding-right: 3px;
-    padding-top: 0px;
-    padding-bottom: 3px;
-    vertical-align: middle ;
-    float: right;
+    display: flex;
+    align-items: center;
 }
 
 .silky-list-item .silky-list-item-value {
-    vertical-align: middle ;
-    padding-left: 5px;
+    padding-left: 4px;
+    flex: 1 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: normal;
 }
 
 .silky-list-item .silky-variable-type-img {
-    width:18px; /*width of your image*/
-    height:18px; /*height of your image*/
+    height:18px;
     background-size: 100% 100%;
     background-repeat: no-repeat;
-    vertical-align: middle ;
+    flex: 0 0 18px;
 }
 
-.silky-list-item.silky-format-variable .silky-variable-type-img.silky-variable-type-none {
-    width:0px;
+.silky-variable-supplier .silky-list-item.silky-format-variable .silky-variable-type-img.silky-variable-type-none {
+    flex: 0 0 0;
+}
+
+.unavaliable_variable .silky-list-item-value {
+    color: #AAAAAA;
+    text-decoration: line-through;
 }
 
 .silky-variablelist-icons .silky-variable-type-img {
@@ -265,6 +240,10 @@ h1 {
 
 .silky-layout-grid.multi-item {
     overflow-x: hidden;
+}
+
+.silky-layout-grid.multi-item.auto-size {
+    overflow-y: hidden;
 }
 
 .silky-layout-grid.multi-item.smallest-size {
@@ -359,3 +338,48 @@ input[type=text].silky-option-listitem:focus {
 .top-level {
     margin-bottom: 20px;
 }
+
+.rmcell-template {
+    /*border-bottom: 1px solid #eaeaea;*/
+}
+
+.rmcell-template .silky-control-label {
+    font-size: 80% ;
+    padding-right: 3px;
+    padding-top: 0px;
+    padding-bottom: 3px;
+}
+
+.rmcell-template .silky-option-list {
+    border-color: transparent;
+    /*height: 50px;*/
+}
+
+.linreg-block-template {
+    /*border-bottom: 1px solid #eaeaea;*/
+}
+
+.linreg-block-template .silky-option-list {
+    border-color: transparent;
+}
+
+
+@import (inline) "../lib/metro-icons.css";
+@import (inline) "./toolbar/toolbar.css";
+@import (inline) "./toolbar/toolbarbutton.css";
+@import (inline) "./toolbar/toolbargroup.css";
+@import (inline) "./toolbar/toolbarseparator.css";
+@import (inline) "iconsupport.css";
+@import (inline) "controlcontainer.css";
+@import (inline) "optionlistcontrol.css";
+@import (inline) "layoutgroupview.css";
+@import (inline) "layoutvariablesview.css";
+@import (inline) "layoutcollapseview.css";
+@import (inline) "gridcheckbox.css";
+@import (inline) "gridradiobutton.css";
+@import (inline) "gridtextbox.css";
+@import (inline) "gridcombobox.css";
+@import (inline) "rmanovafactorscontrol.css";
+@import (inline) "gridvariablestargetlist.css";
+@import (inline) "gridtargetcontrol.css";
+@import (inline) "gridcontrol.css";

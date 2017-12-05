@@ -31,7 +31,7 @@ class Settings:
                     self._root = json.load(file)
                     if type(self._root) is not dict:
                         self._root = { }
-            except:
+            except Exception:
                 self._root = { }
 
         elif parent is not None and name is not None:
@@ -47,6 +47,9 @@ class Settings:
 
     def get(self, name, default=None):
         return self._root.get(name, default)
+
+    def __iter__(self):
+        return self._root.__iter__()
 
     def sync(self):
         if self._parent is not None:

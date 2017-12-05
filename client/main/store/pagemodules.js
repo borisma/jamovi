@@ -9,8 +9,8 @@ const $ = require('jquery');
 const Backbone = require('backbone');
 Backbone.$ = $;
 
-const host = require('../host');
 const Notify = require('../notification');
+const Version = require('../utils/version');
 
 const PageModules = Backbone.View.extend({
     className: 'PageModules',
@@ -60,13 +60,15 @@ const PageModules = Backbone.View.extend({
 
         for (let module of this.model) {
 
+            let version = Version.stringify(module.version, 3);
+
             let html = '';
             html += '<div class="jmv-store-module" data-name="' + module.name + '">';
             html += '<div class="jmv-store-module-lhs">';
             html += '<div class="jmv-store-module-icon"></div>';
             html += '</div>';
             html += '<div class="jmv-store-module-rhs">';
-            html += '    <h2>' + module.title + '<span class="version">' + module.version.join('.') + '</span></h2>';
+            html += '    <h2>' + module.title + '<span class="version">' + version + '</span></h2>';
             html += '    <div class="authors">' + module.authors.join(', ') + '</div>';
             html += '    <div class="description">' + module.description + '</div>';
 
@@ -82,7 +84,7 @@ const PageModules = Backbone.View.extend({
             $module.on('click', event => this._moduleClicked(event));
         }
         this.$uninstall = this.$content.find('.jmv-store-module-button[data-op="remove"]');
-        this.$install = this.$content.find('.jmv-store-module-button[data-op="install"]');
+        this.$install = this.$content.find('.jmv-store-module-button[data-op="install"], .jmv-store-module-button[data-op="update"]');
         this.$modules   = this.$content.children();
 
         this.$uninstall.on('click', event => this._uninstallClicked(event));
@@ -99,12 +101,16 @@ const PageModules = Backbone.View.extend({
                 this._notify({
                     title: 'Module installed',
                     message: 'module was installed successfully',
-                    duration: 3000 });
+                    duration: 3000,
+                    type: 'success'
+                });
             }, error => {
                 this._notify({
                     title: 'Unable to install module',
                     message: error.cause,
-                    duration: 4000 });
+                    duration: 4000,
+                    type: 'error'
+                 });
             });
     },
     _uninstallClicked(event) {
@@ -120,12 +126,16 @@ const PageModules = Backbone.View.extend({
                 this._notify({
                     title: 'Module uninstalled',
                     message: '' + moduleName + ' was uninstalled successfully',
-                    duration: 3000 });
+                    duration: 3000,
+                    type: 'success'
+                });
             }, error => {
                 this._notify({
                     title: 'Unable to uninstall module',
                     message: error.message,
-                    duration: 4000 });
+                    duration: 4000,
+                    type: 'error'
+                });
             });
     },
     _notify(note) {

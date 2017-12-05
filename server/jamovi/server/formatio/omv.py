@@ -3,18 +3,24 @@ import zipfile
 from zipfile import ZipFile
 import io
 import json
-from tempfile import NamedTemporaryFile, TemporaryDirectory
+from tempfile import NamedTemporaryFile
+from tempfile import TemporaryDirectory
 import struct
 import os
 import os.path
 import re
 
+from ...core import ColumnType
 from ...core import MeasureType
 
 
-def write(data, path):
+def write(data, path, html=None):
 
     with ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as zip:
+
+        if html is not None:
+            zip.writestr('index.html', html)
+
         content = io.StringIO()
         content.write('Manifest-Version: 1.0\n')
         content.write('Created-By: jamovi\n')
@@ -28,7 +34,10 @@ def write(data, path):
         for column in data.dataset:
             field = { }
             field['name'] = column.name
+            field['columnType'] = ColumnType.stringify(column.column_type)
             field['measureType'] = MeasureType.stringify(column.measure_type)
+            field['formula'] = column.formula
+            field['formulaMessage'] = column.formula_message
             if column.measure_type == MeasureType.CONTINUOUS:
                 field['type'] = 'number'
             else:
@@ -97,18 +106,23 @@ def write(data, path):
             abs_path = os.path.join(data.instance_path, rel_path)
             zip.write(abs_path, rel_path)
 
-    data.title = os.path.splitext(os.path.basename(path))[0]
-    data.path = path
 
-
-def read(data, path, is_example=False):
+def read(data, path):
 
     data.title = os.path.splitext(os.path.basename(path))[0]
-    if not is_example:
-        data.path = path
 
     with ZipFile(path, 'r') as zip:
-        # manifest = zip.read('META-INF/MANIFEST.MF')
+        manifest = zip.read('META-INF/MANIFEST.MF').decode('utf-8')
+
+        regex = r'^jamovi-Archive-Version: ?([0-9]+)\.([0-9]+) ?$'
+        jav   = re.search(regex, manifest, re.MULTILINE)
+
+        if not jav:
+            raise Exception('File is corrupt (no JAV)')
+
+        jav = (int(jav.group(1)), int(jav.group(2)))
+        if jav[0] > 1:
+            raise Exception('A newer version of jamovi is required')
 
         meta_content = zip.read('metadata.json').decode('utf-8')
         metadata = json.loads(meta_content)
@@ -119,8 +133,13 @@ def read(data, path, is_example=False):
             import_name = meta_column.get('importName', name)
             data.dataset.append_column(name, import_name)
             column = data.dataset[data.dataset.column_count - 1]
-            measure_type = MeasureType.parse(meta_column['measureType'])
+
+            column_type = ColumnType.parse(meta_column.get('columnType', 'Data'))
+            column.column_type = column_type
+            measure_type = MeasureType.parse(meta_column.get('measureType', 'Nominal'))
             column.measure_type = measure_type
+            column.formula = meta_column.get('formula', '')
+            column.formula_message = meta_column.get('formulaMessage', '')
 
         row_count = meta_dataset['rowCount']
 
@@ -134,8 +153,11 @@ def read(data, path, is_example=False):
                 if column.name in xdata:
                     meta_labels = xdata[column.name]['labels']
                     for meta_label in meta_labels:
-                        column.append_level(meta_label[0], meta_label[1])
-        except:
+                        import_value = meta_label[1]
+                        if len(meta_label) > 2:
+                            import_value = meta_label[2]
+                        column.append_level(meta_label[0], meta_label[1],  import_value)
+        except Exception:
             pass
 
         with TemporaryDirectory() as dir:
@@ -163,8 +185,9 @@ def read(data, path, is_example=False):
         is_resource = re.compile('^[0-9][0-9]+ .+/resources/.+')
 
         for entry in zip.infolist():
-            if is_analysis.match(entry.filename) is not None:
+            if is_analysis.match(entry.filename):
+                zip.extract(entry, data.instance_path)
                 serial = zip.read(entry.filename)
                 data.analyses.create_from_serial(serial)
-            elif is_resource.match(entry.filename) is not None:
+            elif is_resource.match(entry.filename):
                 zip.extract(entry, data.instance_path)

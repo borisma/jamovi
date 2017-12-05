@@ -2,11 +2,65 @@
  * Copyright (C) 2016 Jonathon Love
  */
 
-.silky-tableview {
-
+.dialog-widget.background {
+    background-color: rgba(0, 0, 0, .2);
 }
 
-.silky-table-container {
+.dialog-widget.prompt,
+.dialog-widget.confirm {
+    top: calc(33% - 115px);
+    background-color: #F0F0F0;
+    border: 1px solid #ACACAC;
+    border-radius: 2px;
+    box-shadow: none;
+}
+
+.dialog-widget .divider {
+    border-top: none;
+}
+
+.dialog-widget input {
+    border-radius: 2px;
+    border-color: #D0D0D0;
+}
+
+.dialog-widget input:focus {
+    outline: none !important;
+    border: 1px solid #3E6DA9;
+}
+
+.dialog-widget .ok, .dialog-widget .cancel {
+    border-radius: 2px;
+    color: inherit;
+    background-color: #a9c6f2;
+    width: calc(50% - 5px);
+}
+
+.dialog-widget .ok:hover, .dialog-widget .cancel:hover {
+    background-color: #7faaec;
+}
+
+.dialog-widget .ok:focus, .dialog-widget .cancel:focus {
+    outline: none !important;
+    border: 1px solid #3E6DA9;
+}
+
+.dialog-widget .url {
+    display: none;
+}
+
+.dialog-widget .title {
+    margin-top: 10px;
+}
+
+.jmv-tableview.resizing .jmv-column,
+.jmv-tableview.resizing .jmv-column-header,
+.jmv-tableview.resizing .jmv-table-cell-selected,
+.jmv-tableview.resizing .jmv-table-column-highlight {
+    transition: none ;
+}
+
+.jmv-table-container {
     position: relative ;
     overflow: auto ;
     width: 100% ;
@@ -16,58 +70,106 @@
     background-color: #F8F8F8 ;
 }
 
-.silky-column {
+.jmv-column {
     position: absolute ;
     background-color: white ;
 }
 
-.silky-column-row-header {
+.jmv-column,
+.jmv-column-header {
+    transition: .2s left ;
+}
+
+.jmv-column-row-header {
     position: absolute ;
     z-index: 20 ;
     color: #555555 ;
 }
 
-.silky-table-header {
+.jmv-table-header {
     position: absolute ;
     width: 100% ;
-    overflow: hidden ;
     z-index: 20 ;
+    overflow: hidden ;
     box-sizing: border-box ;
 }
 
-.silky-column-header:first-child {
+.jmv-table-header-background {
+    position: absolute ;
+    left: 0 ;
+    top: 0 ;
+    width: 100% ;
+    height: 100% ;
+    border-bottom: 1px solid #ACACAC ;
+    box-sizing: border-box ;
+}
+
+.jmv-column-header:first-child {
     padding-left: 0 ;
 }
 
-.silky-column-header {
+.jmv-column-header {
     position: absolute ;
 
     top: 0 ;
     border-width: 0 1px 1px 0 ;
     border-style: solid ;
     border-image: linear-gradient(to top, #ACACAC, rgba(0,0,0,0));
-    padding: 3px 6px 3px 28px;
+    padding: 3px 6px 4px 6px;
     background-color: #E6E6E6 ;
     border-image-slice: 1 ;
     box-sizing: border-box ;
-    overflow: hidden;
 
     background-repeat: no-repeat ;
     background-size: auto 80% ;
     background-position: 6px 1px ;
+    cursor: url(assets/column-select.svg), auto;
+    display: flex;
+    align-items: center;
 }
 
-.silky-column-header.highlighted,
-.silky-row-header-cell.highlighted {
+
+.jmv-column-header.highlighted,
+.jmv-row-header-cell.highlighted {
     background-color: #CCCCCC ;
     color: #3E6DA9 ;
 }
 
-.silky-column-header:first-child {
+.select-all {
+    cursor: cell;
+}
+
+.jmv-column-header:not(.place-holder):hover,
+.jmv-row-header-cell:hover {
+    background-color: #a6bede;
+}
+
+
+.jmv-column-cell,
+.jmv-column-header-label {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    padding-left: 4px;
+    line-height: normal;
+}
+
+.jmv-column-header-icon {
+    background-size: 100% 100%;
+    background-repeat: no-repeat;
+    height: 16px;
+    flex: 0 0 16px;
+}
+
+.jmv-row-header-cell.virtual {
+    color: #BFBFBF ;
+}
+
+.jmv-column-header:first-child {
     position: relative ;
 }
 
-.silky-column-header-resizer {
+.jmv-column-header-resizer {
     position: absolute ;
     top: -6px ;
     right: -6px ;
@@ -79,73 +181,75 @@
     opacity: 0 ;
 }
 
-.silky-column[data-measuretype="continuous"],
-.silky-column[data-measuretype="nominal"],
-.silky-column[data-measuretype="ordinal"],
-.silky-column[data-measuretype="nominaltext"] .silky-column-cell[data-type="number"] {
-    text-align: right ;
-}
-
-.silky-column[data-measuretype="nominaltext"] .silky-column-cell[data-type="string"] {
+.jmv-column-cell[data-type="string"] {
     text-align: left ;
 }
 
-.silky-column-cell {
+.jmv-column-cell[data-type="number"] {
+    text-align: right ;
+}
+
+.jmv-column-cell {
     padding-left: 10px ;
     padding-right: 10px ;
     overflow: hidden ;
     font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
-input.silky-table-cell-selected {
+.jmv-table-cell-selected {
     position: absolute ;
-    border: 2px solid #5E8BC4 ;
+    border: 1px solid #FFFFFF ;
     z-index: 10 ;
     box-sizing: border-box ;
     transition: left 0.1s, top 0.1s, width 0.1s, height 0.1s ;
-    box-shadow: 0 0 1px 1px #5E8BC4 ;
+    box-shadow: 0 0 0 2px #5E8BC4 ;
     padding: 2px 4px ;
     white-space: no-wrap;
-    background: transparent;
+    background-color: rgba(94, 139, 196, .1);;
     font-size: 12.8px ;
 
     left: -100px ; /* overridden by code */
     top: -100px ;
 }
 
-.silky-table-cell-selected:not(.editing) {
-    cursor: default ;
+input.jmv-table-cell-selected.copying {
+    border: 1px dashed #5E8BC4 ;
 }
 
-.silky-table-cell-selected[data-measuretype="continuous"],
-.silky-table-cell-selected[data-measuretype="nominal"],
-.silky-table-cell-selected[data-measuretype="ordinal"] {
+.jmv-table-cell-selected:not(.editing) {
+    cursor: default ;
+    pointer-events: none ;
+}
+
+.jmv-table-cell-selected[data-measuretype="continuous"],
+.jmv-table-cell-selected[data-measuretype="nominal"],
+.jmv-table-cell-selected[data-measuretype="ordinal"] {
     text-align: right ;
 }
 
-.silky-table-cell-selected br {
+.jmv-table-cell-selected br {
     display: none ;
 }
 
-.silky-table-cell-selected.editing {
+.jmv-table-cell-selected.editing {
     background-color: white ;
 }
 
-.silky-table-row-highlight,
-.silky-table-column-highlight {
+.jmv-table-row-highlight,
+.jmv-table-column-highlight {
     position: absolute ;
-    /*background-color: rgba(160, 160, 160, 0.4);*/
-    z-index: 50 ;
+    z-index: 40 ;
+    pointer-events: none;
 }
 
-.silky-table-row-highlight {
+.jmv-table-row-highlight {
     border-right: 2px solid #5E8BC4 ;
     transition: top 0.1s, width 0.1s, height 0.1s ;
     box-sizing: border-box;
     top: -100px ; /* overridden by code */
 }
 
-.silky-table-column-highlight {
+.jmv-table-column-highlight {
     top: -2px ;
     left: -100px ; /* overridden by code */
     border-bottom: 2px solid #5E8BC4 ;
@@ -153,36 +257,42 @@ input.silky-table-cell-selected {
     pointer-events: none ;
 }
 
-.silky-column-header[data-measuretype="nominaltext"] {
+.jmv-column-header[data-columntype="computed"] > .jmv-column-header-icon {
+    background-image: url('assets/variable-computed.svg');
+}
+
+.jmv-column-header[data-columntype="data"][data-measuretype="nominaltext"] > .jmv-column-header-icon {
     background-image: url('assets/variable-nominal-text.svg');
 }
 
-.silky-column-header[data-measuretype="nominal"] {
+.jmv-column-header[data-columntype="data"][data-measuretype="nominal"] > .jmv-column-header-icon {
     background-image: url('assets/variable-nominal.svg');
 }
 
-.silky-column-header[data-measuretype="ordinal"] {
+.jmv-column-header[data-columntype="data"][data-measuretype="ordinal"] > .jmv-column-header-icon {
     background-image: url('assets/variable-ordinal.svg');
 }
 
-.silky-column-header[data-measuretype="continuous"] {
+.jmv-column-header[data-columntype="data"][data-measuretype="continuous"] > .jmv-column-header-icon {
     background-image: url('assets/variable-continuous.svg');
 }
 
-.silky-table-body {
+.jmv-table-body {
     position: absolute ;
     background-color: white ;
+    cursor: cell;
 }
 
-.silky-row-header-cell,
-.silky-column-cell {
+.jmv-row-header-cell,
+.jmv-column-cell {
     position: absolute ;
     box-sizing: border-box ;
-    padding: 4px 6px 2px 6px ;
+    padding: 1px 6px 1px 6px ;
     width: 100% ;
+    line-height: normal;
 }
 
-.silky-row-header-cell {
+.jmv-row-header-cell {
     background-color: #E6E6E6 ;
     text-align: center ;
     border-width: 0 1px 1px 0 ;
@@ -191,10 +301,10 @@ input.silky-table-cell-selected {
     border-image: linear-gradient(to left, #ACACAC, rgba(0,0,0,0)) 1 100% ;
     border-image-slice: 1 ;
     box-sizing: border-box ;
+    cursor: url(assets/row-select.svg), auto;
 }
 
-.silky-column-cell {
-    background-color: white ;
+.jmv-column-cell {
     border-right: 1px solid #DEDEDE ;
     border-bottom: 1px solid #DEDEDE ;
 }

@@ -2,31 +2,31 @@
  * Copyright (C) 2016 Jonathon Love
  */
 
-.silky-variable-editor {
+.jmv-variable-editor {
     background-color: #F8F8F8 ;
     width: 100% ;
-    height: 200px ;
+    height: 300px ;
     transition: height .2s, border-top .2s ;
     box-sizing: border-box;
     border-top: 1px solid #CCCCCC ;
 }
 
-.silky-variable-editor.hidden {
+.jmv-variable-editor.hidden {
     height: 0 ;
     transition-timing-function: ease, step-end ;
     border-top: 1px solid #F0F0F0 ;
 }
 
-.silky-variable-editor-main {
+.jmv-variable-editor-main {
     position: relative ;
     margin: 0 auto ;
-    width: 600px ;
+    width: 700px ;
     height: 100% ;
     box-sizing: border-box;
     overflow: hidden ;
 }
 
-.silky-variable-editor-ok {
+.jmv-variable-editor-ok {
     position: absolute ;
     right: 12px ;
     top: 12px ;
@@ -42,7 +42,7 @@
     transition: color .2s, border-color .2s ;
 }
 
-.silky-variable-editor-revert {
+.jmv-variable-editor-revert {
     position: absolute ;
     right: 16px ;
     top: 58px ;
@@ -61,22 +61,22 @@
     opacity: 0 ;
 }
 
-.silky-variable-editor-revert.apply {
+.jmv-variable-editor-revert.apply {
     opacity: 1 ;
     color: #AAAAAA ;
     border-color: #AAAAAA;
 }
 
-.silky-variable-editor-ok span.mif-checkmark {
+.jmv-variable-editor-ok span.mif-checkmark {
     color: #AAAAAA ;
     border-color: #AAAAAA;
 }
 
-.silky-variable-editor-ok.apply {
+.jmv-variable-editor-ok.apply {
     border-color: #AAAAAA;
 }
 
-.silky-variable-editor-ok span {
+.jmv-variable-editor-ok span {
     position: absolute ;
     left: 0 ;
     width: 100% ;
@@ -84,207 +84,70 @@
     transition: opacity .4s ;
 }
 
-.silky-variable-editor-ok:not(.apply) span.mif-checkmark {
+.jmv-variable-editor-ok:not(.apply) span.mif-checkmark {
     opacity: 0 ;
 }
 
-.silky-variable-editor-ok.apply span.mif-arrow-up {
+.jmv-variable-editor-ok.apply span.mif-arrow-up {
     opacity: 0 ;
 }
 
-.silky-variable-editor-button-left,
-.silky-variable-editor-button-right {
+.jmv-variable-editor-button-left,
+.jmv-variable-editor-button-right {
     position: absolute ;
     width: 40px ;
     height: 40px ;
-    top: 80px ;
+    top: 130px ;
     font-size: 40px ;
     color: #BBBBBB ;
     transition: opacity .2s ;
     z-index: 1 ;
 }
 
-.silky-variable-editor-button-left.hidden,
-.silky-variable-editor-button-right.hidden {
+.jmv-variable-editor-button-left.hidden,
+.jmv-variable-editor-button-right.hidden {
     opacity: 0 ;
 }
 
-.silky-variable-editor-ok:hover,
-.silky-variable-editor-revert:hover,
-.silky-variable-editor-button-left:hover,
-.silky-variable-editor-button-right:hover {
+.jmv-variable-editor-ok:hover,
+.jmv-variable-editor-revert:hover,
+.jmv-variable-editor-button-left:hover,
+.jmv-variable-editor-button-right:hover {
     color: #999999 ;
     border-color: #999999 ;
 }
 
-.silky-variable-editor-button-left {
+.jmv-variable-editor-button-left {
     left: 10px ;
 }
 
-.silky-variable-editor-button-right {
+.jmv-variable-editor-button-right {
     right: 10px ;
 }
 
-.silky-variable-editor-widget {
+.jmv-variable-editor-widget {
     position: absolute ;
-    padding: 8px 50px ;
+    padding: 8px 100px 10px 100px ;
     width: 100% ;
+    height: 300px;
     box-sizing: border-box;
+    display: flex ;
+    flex-direction: column;
 }
 
-.silky-variable-editor-widget:not(.inactive) {
+.jmv-variable-editor-widget:not(.inactive) {
     transition: left .3s, opacity .3s ;
 }
 
-.silky-variable-editor-widget-title {
+.jmv-variable-editor-widget-title {
     font-size: 150% ;
     color: #555555 ;
-    margin-bottom: 9px ;
-
-
-    -webkit-transition: all 0.30s ease-in-out;
-    -moz-transition: all 0.30s ease-in-out;
-    -ms-transition: all 0.30s ease-in-out;
-    -o-transition: all 0.30s ease-in-out;
-    background-color: transparent;
+    background-color: white;
     padding: 3px 4px 3px 4px;
-    margin: 3px 0px 3px 0px;
-    outline: none;
-    border: 1px solid rgba(181, 202, 239, 0);
+    margin: 3px 27px 10px 0px;
+    border: 1px solid #CCCCCC;
 }
 
-
-.silky-variable-editor-widget-title:focus {
-  box-shadow: 0 0 5px rgba(181, 202, 239, 1);
-  padding: 3px 4px 3px 4px;
-  margin: 3px 1px 3px 0px;
-  border: 1px solid rgba(181, 202, 239, 1);
-}
-
-.silky-variable-editor-widget-body {
-    display: flex ;
-}
-
-.silky-variable-editor-widget-left {
-    display: flex ;
-    flex-direction: column ;
-}
-
-.silky-variable-editor-widget-types {
-    display: inline-block ;
-    width: 150px ;
-}
-
-.silky-variable-editor-widget-types-highlight {
-    position: absolute ;
-    padding: 2px ;
-    width: 32px ;
-    height: 32px ;
-    background-color: #E8E8E8 ;
-    transition: all .2s ;
-}
-
-.silky-variable-editor-autotype {
-    margin: 4px 0 0 24px ;
-}
-
-.silky-variable-editor-widget-option {
-    padding: 2px ;
-    vertical-align: middle;
-    position: relative ;
-    z-index: 1 ;
-}
-
-.silky-variable-editor-widget-option:hover {
-    background-color: #F0F0F0 ;
-}
-
-.silky-variable-editor-widget-option.selected:hover {
-    background-color: #E8E8E8 ;
-}
-
-.silky-variable-editor-widget span {
-    line-height: 20px ;
-}
-
-.silky-variable-editor-widget input {
-    vertical-align: middle ;
-}
-
-.silky-variable-editor-variable-type {
-    display: inline-block ;
-    width: 20px ;
-    height: 20px ;
-    background-size: 100% ;
-    vertical-align: top ;
-    margin-right: 6px ;
-    vertical-align: top ;
-}
-
-.silky-variable-editor-autotype {
-    display: inline-block ;
-}
-
-.silky-variable-editor-variable-type[data-type="nominaltext"] {
-    background-image: url('assets/variable-nominal-text.svg');
-}
-
-.silky-variable-editor-variable-type[data-type="nominal"] {
-    background-image: url('assets/variable-nominal.svg');
-}
-
-.silky-variable-editor-variable-type[data-type="ordinal"] {
-    background-image: url('assets/variable-ordinal.svg');
-}
-
-.silky-variable-editor-variable-type[data-type="continuous"] {
-    background-image: url('assets/variable-continuous.svg');
-}
-
-.silky-variable-editor-levels {
-    display: inline-block ;
-    vertical-align: top ;
-    margin-left: 12px ;
-    height: 140px ;
-    width: 220px ;
-    background-color: white ;
-    border: 1px solid #CCCCCC ;
-    box-sizing: border-box ;
-    padding-top: 4px ;
-    padding-bottom: 4px ;
-    overflow-y: auto ;
-    overflow-x: hidden ;
-}
-
-.silky-variable-editor-level {
-    padding: 4px 12px ;
-    box-sizing: border-box;
-}
-
-.silky-variable-editor-level.selected {
-    background-color: #B5CAEF ;
-}
-
-.silky-variable-editor-widget-move {
-    display: inline-block ;
-    vertical-align: top ;
-    font-size: 150% ;
-    margin-left: 8px ;
-    color: #BBBBBB ;
-}
-
-.silky-variable-editor-widget-move-up,
-.silky-variable-editor-widget-move-down {
-    margin-bottom: 4px ;
-    transition: opacity .2s ;
-}
-
-.silky-variable-editor-widget-move-up.disabled,
-.silky-variable-editor-widget-move-down.disabled {
-    opacity: 0.4 ;
-}
-
-.silky-variable-editor-widget-move-up:not(.disabled):hover,
-.silky-variable-editor-widget-move-down:not(.disabled):hover {
-    color: #999999 ;
+.jmv-variable-editor-main[data-type='computed'] .jmv-variable-editor-widget-title {
+    margin-right: 0;
 }

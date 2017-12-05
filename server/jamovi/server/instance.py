@@ -6,6 +6,7 @@ import os
 import os.path
 import platform
 
+from ..core import ColumnType
 from ..core import MeasureType
 from ..core import Dirs
 from ..core import MemoryMap
@@ -16,9 +17,12 @@ from .settings import Settings
 from . import jamovi_pb2 as jcoms
 
 from .utils import conf
+from .utils import FileEntry
+from .utils import CSVParser
+from .utils import HTMLParser
 from .enginemanager import EngineManager
-from .analyses import Analyses
 from .modules import Modules
+from .instancemodel import InstanceModel
 from . import formatio
 
 import uuid
@@ -36,75 +40,36 @@ from .utils import fs
 log = logging.getLogger('jamovi')
 
 
-class InstanceData:
-    def __init__(self):
-        self.analyses = None
-        self.dataset = None
-        self.title = None
-        self.path = ''
-
-
 class Instance:
 
     instances = { }
     _garbage_collector = None
+    _update_status = 'na'
+
+    def _update_status_req(x):
+        # this gets assigned to
+        pass
+
+    @staticmethod
+    def set_update_status(status):
+        Instance._update_status = status
+        for instanceId, instance in Instance.instances.items():
+            if instance.is_active:
+                instance._on_settings()
+
+        if status == 'available':
+            settings = Settings.retrieve('main')
+            settings.sync()
+            if settings.get('autoUpdate', False):
+                Instance._update_status_req('downloading')
+
+    @staticmethod
+    def set_update_request_handler(request_fun):
+        Instance._update_status_req = request_fun
 
     @staticmethod
     def get(instance_id):
         return Instance.instances.get(instance_id)
-
-    class GarbageCollector:
-
-        def __init__(self):
-            self._stopped = False
-            self._thread = Thread(target=self.run)
-            self._thread.start()
-
-        def run(self):
-            parent = threading.main_thread()
-
-            while True:
-                time.sleep(.3)
-                if self._stopped is True:
-                    break
-                if parent.is_alive() is False:
-                    break
-                for id, instance in Instance.instances.items():
-                    if instance.inactive_for > 2:
-                        log.info('cleaning up: ' + str(id))
-                        instance.close()
-                        del Instance.instances[id]
-                        break
-
-        def stop(self):
-            self._stopped = True
-
-    def _normalise_path(path):
-        nor_path = path
-        if path.startswith('{{Documents}}'):
-            nor_path = path.replace('{{Documents}}', Dirs.documents_dir())
-        elif path.startswith('{{Desktop}}'):
-            nor_path = path.replace('{{Desktop}}', Dirs.desktop_dir())
-        elif path.startswith('{{Home}}'):
-            nor_path = path.replace('{{Home}}', Dirs.home_dir())
-        elif path.startswith('{{Examples}}'):
-            nor_path = path.replace('{{Examples}}', conf.get('examples_path'))
-        return nor_path
-
-    def _virtualise_path(path):
-        documents_dir = Dirs.documents_dir()
-        home_dir = Dirs.home_dir()
-        desktop_dir = Dirs.desktop_dir()
-
-        vir_path = path
-        if path.startswith(documents_dir):
-            vir_path = path.replace(documents_dir, '{{Documents}}')
-        elif path.startswith(desktop_dir):
-            vir_path = path.replace(desktop_dir, '{{Desktop}}')
-        elif path.startswith(home_dir):
-            vir_path = path.replace(home_dir, '{{Home}}')
-
-        return vir_path
 
     def __init__(self, session_path, instance_id=None):
 
@@ -117,9 +82,7 @@ class Instance:
         self._instance_id = instance_id
 
         self._mm = None
-        self._data = InstanceData()
-        self._data.dataset = None
-        self._data.analyses = Analyses()
+        self._data = InstanceModel()
 
         self._coms = None
         self._em = EngineManager(self._instance_id, self._data.analyses, session_path)
@@ -139,6 +102,53 @@ class Instance:
 
         Instance.instances[self._instance_id] = self
 
+        Modules.instance().add_listener(self._module_event)
+
+        handler = Instance.LogHandler(self)
+        handler.setLevel('DEBUG')
+        self._log = logging.getLogger(instance_id)
+        self._log.propagate = False
+        self._log.setLevel('DEBUG')
+        self._log.addHandler(handler)
+        self._data.set_log(self._log)
+
+    def _normalise_path(path):
+        nor_path = path
+        if path.startswith('{{Documents}}'):
+            nor_path = path.replace('{{Documents}}', Dirs.documents_dir())
+        elif path.startswith('{{Downloads}}'):
+            nor_path = path.replace('{{Downloads}}', Dirs.downloads_dir())
+        elif path.startswith('{{Desktop}}'):
+            nor_path = path.replace('{{Desktop}}', Dirs.desktop_dir())
+        elif path.startswith('{{Home}}'):
+            nor_path = path.replace('{{Home}}', Dirs.home_dir())
+        elif path.startswith('{{Examples}}'):
+            nor_path = path.replace('{{Examples}}', conf.get('examples_path'))
+        return nor_path
+
+    def _virtualise_path(path):
+        documents_dir = Dirs.documents_dir()
+        home_dir = Dirs.home_dir()
+        desktop_dir = Dirs.desktop_dir()
+        downloads_dir = Dirs.downloads_dir()
+
+        vir_path = path
+        if path.startswith(documents_dir):
+            vir_path = path.replace(documents_dir, '{{Documents}}')
+        elif path.startswith(downloads_dir):
+            vir_path = path.replace(downloads_dir, '{{Downloads}}')
+        elif path.startswith(desktop_dir):
+            vir_path = path.replace(desktop_dir, '{{Desktop}}')
+        elif path.startswith(home_dir):
+            vir_path = path.replace(home_dir, '{{Home}}')
+
+        return vir_path
+
+    def _module_event(self, event):
+        if event['type'] == 'moduleInstalled':
+            module_name = event['data']['name']
+            self._notify_module_installed(module_name)
+
     @property
     def id(self):
         return self._instance_id
@@ -151,6 +161,7 @@ class Instance:
         self._inactive_since = None
 
     def close(self):
+        Modules.instance().remove_listener(self._module_event)
         if self._mm is not None:
             self._mm.close()
         self._em.stop()
@@ -193,7 +204,7 @@ class Instance:
             self._on_analysis(request)
         elif type(request) == jcoms.FSRequest:
             self._on_fs_request(request)
-        elif type(request) == jcoms.ModuleRequest:
+        elif type(request) == jcoms.ModuleRR:
             self._on_module(request)
         elif type(request) == jcoms.StoreRequest:
             self._on_store(request)
@@ -207,27 +218,47 @@ class Instance:
 
     def _on_fs_request(self, request):
         path = request.path
-        location = path
 
-        path = Instance._normalise_path(path)
+        if path != '':
+            abs_path = Instance._normalise_path(path)
+            path = Instance._virtualise_path(path)
+        else:
+            path = '{{Documents}}'
+            abs_path = Dirs.documents_dir()
+            if os.path.exists(abs_path):
+                path = '{{Documents}}'
+            else:
+                path = '{{Root}}'
 
         response = jcoms.FSResponse()
+        response.path = path
+        response.osPath = abs_path
+
         if path.startswith('{{Root}}'):
 
-            entry = response.contents.add()
-            entry.name = 'Documents'
-            entry.path = '{{Documents}}'
-            entry.type = jcoms.FSEntry.Type.Value('SPECIAL_FOLDER')
+            if os.path.exists(Dirs.documents_dir()):
+                entry = response.contents.add()
+                entry.name = 'Documents'
+                entry.path = '{{Documents}}'
+                entry.type = jcoms.FSEntry.Type.Value('SPECIAL_FOLDER')
 
-            entry = response.contents.add()
-            entry.name = 'Desktop'
-            entry.path = '{{Desktop}}'
-            entry.type = jcoms.FSEntry.Type.Value('SPECIAL_FOLDER')
+            if os.path.exists(Dirs.downloads_dir()):
+                entry = response.contents.add()
+                entry.name = 'Downloads'
+                entry.path = '{{Downloads}}'
+                entry.type = jcoms.FSEntry.Type.Value('SPECIAL_FOLDER')
 
-            entry = response.contents.add()
-            entry.name = 'Home'
-            entry.path = '{{Home}}'
-            entry.type = jcoms.FSEntry.Type.Value('SPECIAL_FOLDER')
+            if os.path.exists(Dirs.desktop_dir()):
+                entry = response.contents.add()
+                entry.name = 'Desktop'
+                entry.path = '{{Desktop}}'
+                entry.type = jcoms.FSEntry.Type.Value('SPECIAL_FOLDER')
+
+            if os.path.exists(Dirs.home_dir()):
+                entry = response.contents.add()
+                entry.name = 'Home'
+                entry.path = '{{Home}}'
+                entry.type = jcoms.FSEntry.Type.Value('SPECIAL_FOLDER')
 
             if platform.uname().system == 'Windows':
                 for drive_letter in range(ord('A'), ord('Z') + 1):
@@ -237,34 +268,56 @@ class Instance:
                         entry.name = drive
                         entry.path = drive
                         entry.type = jcoms.FSEntry.Type.Value('DRIVE')
+            else:
+                entry = response.contents.add()
+                entry.name = '/'
+                entry.path = '/'
+                entry.type = jcoms.FSEntry.Type.Value('FOLDER')
 
             self._coms.send(response, self._instance_id, request)
 
         else:
             try:
-                for direntry in os.scandir(path + '/'):  # add a / in case we get C:
+                entries = [ ]
+
+                for direntry in os.scandir(abs_path + '/'):  # add a / in case we get C:
+
                     if fs.is_hidden(direntry.path):
                         show = False
                     elif direntry.is_dir():
-                        entry_type = jcoms.FSEntry.Type.Value('FOLDER')
+                        entry_type = FileEntry.Type.FOLDER
                         if fs.is_link(direntry.path):
                             show = False
                         else:
                             show = True
                     else:
-                        entry_type = jcoms.FSEntry.Type.Value('FILE')
+                        entry_type = FileEntry.Type.FILE
                         show = formatio.is_supported(direntry.name)
 
                     if show:
-                        entry = response.contents.add()
+                        entry = FileEntry()
                         entry.name = direntry.name
                         entry.type = entry_type
-                        entry.path = posixpath.join(location, direntry.name)
+                        entry.path = posixpath.join(path, direntry.name)
+                        entries.append(entry)
+
+                entries = sorted(entries)
+
+                for entry in entries:
+
+                    entry_type = jcoms.FSEntry.Type.Value('FILE')
+                    if entry.type is FileEntry.Type.FOLDER:
+                        entry_type = jcoms.FSEntry.Type.Value('FOLDER')
+
+                    entry_pb = response.contents.add()
+                    entry_pb.name = entry.name
+                    entry_pb.type = entry_type
+                    entry_pb.path = entry.path
 
                 self._coms.send(response, self._instance_id, request)
 
             except OSError as e:
-                base    = os.path.basename(path)
+                base    = os.path.basename(abs_path)
                 message = 'Unable to open {}'.format(base)
                 cause = e.strerror
                 self._coms.send_error(message, cause, self._instance_id, request)
@@ -275,35 +328,98 @@ class Instance:
 
         try:
             file_exists = os.path.isfile(path)
-            success = False
             if file_exists is False or request.overwrite is True:
-                formatio.write(self._data, path)
-                success = True
-                self._data.dataset.is_edited = False
-
-            response = jcoms.SaveProgress()
-            response.fileExists = file_exists
-            response.success = success
-            self._coms.send(response, self._instance_id, request)
-
-            if success:
-                self._add_to_recents(path)
+                if path.endswith('.omv'):
+                    self._on_save_everything(request)
+                elif request.incContent:
+                    self._on_save_content(request)
+                elif request.part != '':
+                    self._on_save_part(request)
+                else:
+                    self._on_save_everything(request)
+            else:
+                response = jcoms.SaveProgress()
+                response.fileExists = True
+                response.success = False
+                self._coms.send(response, self._instance_id, request)
 
         except OSError as e:
+            log.exception(e)
             base    = os.path.basename(path)
             message = 'Unable to save {}'.format(base)
             cause = e.strerror
             self._coms.send_error(message, cause, self._instance_id, request)
 
         except Exception as e:
+            log.exception(e)
             base    = os.path.basename(path)
             message = 'Unable to save {}'.format(base)
             cause = str(e)
             self._coms.send_error(message, cause, self._instance_id, request)
 
+    def _on_save_content(self, request):
+        path = request.filename
+        path = Instance._normalise_path(path)
+
+        with open(path, 'wb') as file:
+            file.write(request.content)
+
+        response = jcoms.SaveProgress()
+        response.success = True
+        self._coms.send(response, self._instance_id, request)
+
+    def _on_save_everything(self, request):
+        path = request.filename
+        path = Instance._normalise_path(path)
+        is_export = request.export
+        content = request.content
+
+        formatio.write(self._data, path, content)
+
+        if not is_export:
+            self._data.title = os.path.splitext(os.path.basename(path))[0]
+            self._data.path = path
+            self._data.is_edited = False
+
+        response = jcoms.SaveProgress()
+        response.success = True
+        response.path = Instance._virtualise_path(path)
+        self._coms.send(response, self._instance_id, request)
+
+        if not is_export:
+            self._add_to_recents(path)
+
+    def _on_save_part(self, request):
+        path = request.filename
+        path = Instance._normalise_path(path)
+        part = request.part
+
+        segments = part.split('/')
+        analysisId = int(segments[0])
+        address = '/'.join(segments[1:])
+
+        analysis = self.analyses.get(analysisId)
+
+        if analysis is not None:
+            result = analysis.save(path, address)
+            result.add_done_callback(lambda result: self._on_part_saved(request, result))
+        else:
+            self._coms.send_error('Error', 'Unable to access analysis', self._instance_id, request)
+
+    def _on_part_saved(self, request, result):
+        try:
+            result.result()
+            response = jcoms.SaveProgress()
+            response.success = True
+            self._coms.send(response, self._instance_id, request)
+        except Exception as e:
+            self._coms.send_error('Unable to save', str(e), self._instance_id, request)
+
     def _on_open(self, request):
         path = request.filename
-        nor_path = Instance._normalise_path(path)
+
+        norm_path = Instance._normalise_path(path)
+        virt_path = Instance._virtualise_path(path)
 
         self._mm = MemoryMap.create(self._buffer_path, 65536)
         dataset = DataSet.create(self._mm)
@@ -312,19 +428,24 @@ class Instance:
             self._data.dataset = dataset
 
             is_example = path.startswith('{{Examples}}')
-            formatio.read(self._data, nor_path, is_example)
-            self._coms.send(None, self._instance_id, request)
+            formatio.read(self._data, norm_path, is_example)
+
+            response = jcoms.OpenProgress()
+            response.path = virt_path
+            self._coms.send(response, self._instance_id, request)
 
             if path != '' and not is_example:
                 self._add_to_recents(path)
 
         except OSError as e:
+            log.exception(e)
             base    = os.path.basename(path)
             message = 'Unable to open {}'.format(base)
             cause = e.strerror
             self._coms.send_error(message, cause, self._instance_id, request)
 
         except Exception as e:
+            log.exception(e)
             base    = os.path.basename(path)
             message = 'Unable to open {}'.format(base)
             cause = str(e)
@@ -388,18 +509,22 @@ class Instance:
 
         response = jcoms.InfoResponse()
 
-        has_dataset = self._data.dataset is not None
+        has_dataset = self._data.has_dataset
         response.hasDataSet = has_dataset
 
         if has_dataset:
             response.title = self._data.title
-            response.path = self._data.path
-            response.rowCount = self._data.dataset.row_count
-            response.columnCount = self._data.dataset.column_count
-            response.edited = self._data.dataset.is_edited
-            response.blank = self._data.dataset.is_blank
+            response.path = Instance._virtualise_path(self._data.path)
+            response.edited = self._data.is_edited
+            response.blank = self._data.is_blank
+            response.importPath = Instance._virtualise_path(self._data.import_path)
 
-            for column in self._data.dataset:
+            response.schema.rowCount = self._data.row_count
+            response.schema.vRowCount = self._data.virtual_row_count
+            response.schema.columnCount = self._data.column_count
+            response.schema.vColumnCount = self._data.virtual_column_count
+
+            for column in self._data:
                 column_schema = response.schema.columns.add()
                 self._populate_column_schema(column, column_schema)
 
@@ -412,33 +537,51 @@ class Instance:
 
     def _on_dataset(self, request):
 
-        if self._data.dataset is None:
+        if self._data is None:
             return
 
-        response = jcoms.DataSetRR()
+        try:
 
-        response.op = request.op
-        response.rowStart    = request.rowStart
-        response.columnStart = request.columnStart
-        response.rowEnd      = request.rowEnd
-        response.columnEnd   = request.columnEnd
+            response = jcoms.DataSetRR()
 
-        if request.op == jcoms.GetSet.Value('SET'):
-            self._on_dataset_set(request, response)
-        else:
-            self._on_dataset_get(request, response)
+            response.op = request.op
+            response.rowStart    = request.rowStart
+            response.columnStart = request.columnStart
+            response.rowEnd      = request.rowEnd
+            response.columnEnd   = request.columnEnd
 
-        self._coms.send(response, self._instance_id, request)
+            if request.op == jcoms.GetSet.Value('SET'):
+                self._on_dataset_set(request, response)
+            elif request.op == jcoms.GetSet.Value('GET'):
+                self._on_dataset_get(request, response)
+            elif request.op == jcoms.GetSet.Value('INS_ROWS'):
+                self._on_dataset_ins_rows(request, response)
+            elif request.op == jcoms.GetSet.Value('INS_COLS'):
+                self._on_dataset_ins_cols(request, response)
+            elif request.op == jcoms.GetSet.Value('DEL_ROWS'):
+                self._on_dataset_del_rows(request, response)
+            elif request.op == jcoms.GetSet.Value('DEL_COLS'):
+                self._on_dataset_del_cols(request, response)
+            else:
+                raise ValueError()
+
+            self._coms.send(response, self._instance_id, request)
+
+        except TypeError as e:
+            self._coms.send_error('Could not assign data', str(e), self._instance_id, request)
+        except Exception as e:
+            log.exception(e)
+            self._coms.send_error('Could not assign data', str(e), self._instance_id, request)
 
     def _on_module(self, request):
 
         modules = Modules.instance()
 
-        if request.command == jcoms.ModuleRequest.ModuleCommand.Value('INSTALL'):
+        if request.command == jcoms.ModuleRR.ModuleCommand.Value('INSTALL'):
             modules.install(
                 request.path,
                 lambda t, result: self._on_module_callback(t, result, request))
-        elif request.command == jcoms.ModuleRequest.ModuleCommand.Value('UNINSTALL'):
+        elif request.command == jcoms.ModuleRR.ModuleCommand.Value('UNINSTALL'):
             try:
                 modules.uninstall(request.name)
                 self._coms.send(None, self._instance_id, request)
@@ -479,7 +622,7 @@ class Instance:
             progress.total = result[1]
             self._coms.send(progress, self._instance_id, request, complete=False)
         elif t == 'error':
-            self._coms.send_error('Unable to access store', str(result), self._instance_id, request)
+            self._coms.send_error('Unable to access library', str(result), self._instance_id, request)
         elif t == 'success':
             response = jcoms.StoreResponse()
             for module in result:
@@ -494,8 +637,17 @@ class Instance:
             if instance.is_active:
                 instance._on_settings()
 
+    def _notify_module_installed(self, name):
+
+        broadcast = jcoms.ModuleRR()
+        broadcast.command = jcoms.ModuleRR.ModuleCommand.Value('INSTALL')
+        broadcast.name = name
+
+        if self._coms is not None:
+            self._coms.send(broadcast, self._instance_id)
+
     def _on_dataset_set(self, request, response):
-        if request.incData:
+        if request.incData or request.incCBData:
             self._apply_cells(request, response)
         if request.incSchema:
             self._apply_schema(request, response)
@@ -506,75 +658,321 @@ class Instance:
         if request.incData:
             self._populate_cells(request, response)
 
+    def _on_dataset_ins_rows(self, request, response):
+        self._data.insert_rows(request.rowStart, request.rowEnd)
+        self._populate_schema(request, response)
+
+    def _on_dataset_ins_cols(self, request, response):
+        self._data.insert_column(request.columnStart)
+        column = self._data[request.columnStart]
+
+        if request.incSchema and len(request.schema.columns) == 1:
+            column_pb = request.schema.columns[0]
+            column.change(measure_type=column_pb.measureType)
+            column.column_type = column_pb.columnType
+            column.auto_measure = column_pb.autoMeasure
+
+        response.schema.rowCount = self._data.row_count
+        response.schema.vRowCount = self._data.virtual_row_count
+        response.schema.columnCount = self._data.column_count
+        response.schema.vColumnCount = self._data.virtual_column_count
+
+        response.incSchema = True
+        column_pb = response.schema.columns.add()
+        self._populate_column_schema(column, column_pb)
+
+    def _on_dataset_del_rows(self, request, response):
+        self._data.delete_rows(request.rowStart, request.rowEnd)
+        self._populate_schema(request, response)
+
+    def _on_dataset_del_cols(self, request, response):
+
+        columns = [None] * (request.columnEnd - request.columnStart + 1)
+
+        for i in range(len(columns)):
+            column = self._data[i + request.columnStart]
+            column.change(formula='')  # clear formula to clean up dependents
+            columns[i] = column
+
+        reparse = set(columns)
+        for column in columns:
+            dependents = column.dependents
+            reparse.update(dependents)
+
+        self._data.delete_columns(request.columnStart, request.columnEnd)
+
+        for column in reparse:
+            column.parse_formula()
+            column.needs_recalc = True
+
+        for column in reparse:
+            column.recalc()
+
+        self._populate_schema(request, response)
+
     def _apply_schema(self, request, response):
-        for i in range(len(request.schema)):
-            column_schema = request.schema[i]
-            column = self._data.dataset.get_column_by_id(column_schema.id)
+
+        n_cols_before = self._data.virtual_column_count
+
+        min_index = self._data.virtual_column_count
+
+        for column_schema in request.schema.columns:
+            column = self._data.get_column_by_id(column_schema.id)
+            if column.index < min_index:
+                min_index = column.index
+
+        for i in range(self._data.column_count, min_index):
+            column = self._data[i]
+            column.realise()
+            response.incSchema = True
+            schema = response.schema.columns.add()
+            self._populate_column_schema(column, schema)
+
+        cols_w_schema_change = set()
+        recalc = set()
+        reparse = set()
+
+        for column_schema in request.schema.columns:
+            column = self._data.get_column_by_id(column_schema.id)
+            old_name = column.name
 
             levels = None
             if column_schema.hasLevels:
                 levels = [ ]
                 for level in column_schema.levels:
-                    levels.append((level.value, level.label))
+                    levels.append((level.value, level.label, level.importValue))
 
-            column.change(column_schema.measureType, column_schema.name, levels, auto_measure=column_schema.autoMeasure)
+            column.change(
+                name=column_schema.name,
+                column_type=column_schema.columnType,
+                measure_type=column_schema.measureType,
+                levels=levels,
+                auto_measure=column_schema.autoMeasure,
+                formula=column_schema.formula)
 
+            column.needs_recalc = True
+            column.recalc()
+
+            dependents = column.dependents
+
+            cols_w_schema_change.add(column)
+            cols_w_schema_change.update(dependents)
+            recalc.update(dependents)
+
+            if old_name != column.name:     # if a name has changed, then
+                reparse.update(dependents)  # dep columns need to be reparsed
+
+        for column in reparse:
+            column.parse_formula()
+        for column in recalc:
+            column.needs_recalc = True
+        for column in recalc:
+            column.recalc()
+
+        self._data.is_edited = True
+
+        for i in range(n_cols_before, self._data.virtual_column_count):  # cols added
+            column = self._data[i]
+            cols_w_schema_change.add(column)
+
+        for column in cols_w_schema_change:
             response.incSchema = True
-            schema = response.schema.add()
-            self._populate_column_schema(column, schema)
+            columnPB = response.schema.columns.add()
+            self._populate_column_schema(column, columnPB)
 
-        self._data.dataset.is_edited = True
+    def _parse_cells(self, request):
+
+        if request.incData:
+
+            selection = {
+                'row_start': request.rowStart,
+                'col_start': request.columnStart,
+                'row_end': request.rowEnd,
+                'col_end': request.columnEnd,
+            }
+
+            row_count = request.rowEnd - request.rowStart + 1
+            col_count = request.columnEnd - request.columnStart + 1
+
+            cells = [None] * col_count
+
+            for i in range(col_count):
+
+                cells[i] = [None] * row_count
+
+                values = request.data[i].values
+
+                for j in range(row_count):
+                    cell_pb = values[j]
+                    if cell_pb.HasField('o'):
+                        cells[i][j] = None
+                    elif cell_pb.HasField('d'):
+                        cells[i][j] = cell_pb.d
+                    elif cell_pb.HasField('i'):
+                        cells[i][j] = cell_pb.i
+                    elif cell_pb.HasField('s'):
+                        cells[i][j] = cell_pb.s
+
+            return cells, selection
+
+        elif request.incCBData:
+
+            if request.cbHtml != '':
+                parser = HTMLParser()
+                parser.feed(request.cbHtml)
+                parser.close()
+                cells = parser.result()
+            else:
+                parser = CSVParser()
+                parser.feed(request.cbText)
+                parser.close()
+                cells = parser.result()
+
+            col_end = request.columnStart + len(cells) - 1
+            row_end = request.rowStart - 1
+            if (len(cells) > 0):
+                row_end += len(cells[0])
+
+            selection = {
+                'row_start': request.rowStart,
+                'col_start': request.columnStart,
+                'row_end': row_end,
+                'col_end': col_end,
+            }
+
+            return cells, selection
+
+        else:
+            return [ ], { }
 
     def _apply_cells(self, request, response):
-        row_start = request.rowStart
-        col_start = request.columnStart
-        row_end   = request.rowEnd
-        col_end   = request.columnEnd
+
+        cells, selection = self._parse_cells(request)
+
+        row_start = selection['row_start']
+        col_start = selection['col_start']
+        row_end   = selection['row_end']
+        col_end   = selection['col_end']
         row_count = row_end - row_start + 1
         col_count = col_end - col_start + 1
 
-        for i in range(col_count):
-            column = self._data.dataset[col_start + i]
-            col_res = request.data[i]
+        response.rowStart    = row_start
+        response.columnStart = col_start
+        response.rowEnd      = row_end
+        response.columnEnd   = col_end
 
+        if row_count == 0 or col_count == 0:
+            return
+
+        # check that the assignments are possible
+
+        for i in range(col_count):
+            index = col_start + i
+            if index >= self._data.column_count:
+                break
+            column = self._data[index]
+
+            if column.column_type == ColumnType.COMPUTED:
+                raise TypeError("Cannot assign to computed column '{}'".format(column.name))
+            elif column.column_type == ColumnType.RECODED:
+                raise TypeError("Cannot assign to recoded column '{}'".format(column.name))
+
+            if column.auto_measure:
+                continue
+
+            values = cells[i]
+
+            if column.measure_type == MeasureType.CONTINUOUS:
+                for value in values:
+                    if value is not None and value != '' and not isinstance(value, int) and not isinstance(value, float):
+                        raise TypeError("Cannot assign non-numeric value to column '{}'".format(column.name))
+
+            elif column.measure_type == MeasureType.NOMINAL or column.measure_type == MeasureType.ORDINAL:
+                for value in values:
+                    if value is not None and value != '' and not isinstance(value, int):
+                        raise TypeError("Cannot assign non-interger value to column '{}'".format(column.name))
+
+        # assign
+
+        n_cols_before = self._data.virtual_column_count
+        n_rows_before = self._data.row_count
+
+        if row_end >= self._data.row_count:
+            self._data.set_row_count(row_end + 1)
+
+        cols_w_schema_change = set()  # schema changes to send
+        recalc = set()  # computed columns that need to update from these changes
+
+        for i in range(self._data.column_count, col_start):
+            column = self._data[i]
+            column.realise()
+            cols_w_schema_change.add(column)
+
+        for i in range(col_count):
+            column = self._data[col_start + i]
+            column.column_type = ColumnType.DATA
+            column.needs_recalc = True  # invalidate dependent nodes
+
+            values = cells[i]
+
+            was_virtual = column.is_virtual
             changes = column.changes
+
+            if column.auto_measure:  # change column type if necessary
+
+                mt = column.measure_type
+
+                for j in range(row_count):
+                    value = values[j]
+                    if value is None or value == '':
+                        pass
+                    elif isinstance(value, float):
+                        if mt is not MeasureType.NOMINAL_TEXT:
+                            mt = MeasureType.CONTINUOUS
+                    elif isinstance(value, int):
+                        if mt is not MeasureType.NOMINAL_TEXT and mt is not MeasureType.CONTINUOUS:
+                            mt = MeasureType.NOMINAL
+                    elif isinstance(value, str):
+                        mt = MeasureType.NOMINAL_TEXT
+
+                if mt != column.measure_type:
+                    column.change(measure_type=mt)
 
             if column.measure_type == MeasureType.CONTINUOUS:
                 nan = float('nan')
                 for j in range(row_count):
-                    cell = col_res.values[j]
-                    if cell.HasField('o'):
-                        if cell.o == jcoms.SpecialValues.Value('MISSING'):
-                            column[row_start + j] = nan
-                    elif cell.HasField('d'):
-                        column[row_start + j] = cell.d
-                    elif cell.HasField('i'):
-                        column[row_start + j] = cell.i
-                    elif cell.HasField('s') and column.auto_measure:
-                        column.change(MeasureType.NOMINAL_TEXT)
+                    value = values[j]
+                    if value is None or value == '':
+                        column[row_start + j] = nan
+                    elif isinstance(value, float):
+                        column[row_start + j] = value
+                    elif isinstance(value, int):
+                        column[row_start + j] = value
+                    elif isinstance(value, str) and column.auto_measure:
+                        column.change(measure_type=MeasureType.NOMINAL_TEXT)
                         index = column.level_count
-                        column.insert_level(index, cell.s)
+                        column.insert_level(index, value)
                         column[row_start + j] = index
+                    else:
+                        raise TypeError("Cannot assign non-numeric value to column '{}'", column.name)
 
             elif column.measure_type == MeasureType.NOMINAL_TEXT:
                 for j in range(row_count):
-                    cell = col_res.values[j]
-                    if cell.HasField('o'):
-                        if cell.o == jcoms.SpecialValues.Value('MISSING'):
-                            column[row_start + j] = -2147483648
+                    value = values[j]
+
+                    if value is None or value == '':
+                        column[row_start + j] = -2147483648
                     else:
-                        if cell.HasField('s'):
-                            value = cell.s
+                        if isinstance(value, str):
                             if value == '':
                                 value = -2147483648
-                        elif cell.HasField('d'):
-                            value = cell.d
+                        elif isinstance(value, float):
                             if math.isnan(value):
                                 value = -2147483648
                             else:
                                 value = str(value)
                         else:
-                            value = cell.i
+                            value = str(value)
 
                         column.clear_at(row_start + j)  # necessary to clear first with NOMINAL_TEXT
 
@@ -588,22 +986,19 @@ class Instance:
                         column[row_start + j] = index
             else:
                 for j in range(row_count):
-                    cell = col_res.values[j]
-                    if cell.HasField('o'):
-                        if cell.o == jcoms.SpecialValues.Value('MISSING'):
-                            column[row_start + j] = -2147483648
-                    elif cell.HasField('i'):
-                        value = cell.i
+                    value = values[j]
+                    if value is None or value == '':
+                        column[row_start + j] = -2147483648
+                    elif isinstance(value, int):
                         if not column.has_level(value) and value != -2147483648:
                             column.insert_level(value, str(value))
                         column[row_start + j] = value
-                    elif cell.HasField('d') and column.auto_measure:
-                        column.change(MeasureType.CONTINUOUS)
-                        column[row_start + j] = cell.d
-                    elif cell.HasField('s') and column.auto_measure:
-                        column.change(MeasureType.NOMINAL_TEXT)
+                    elif isinstance(value, float) and column.auto_measure:
+                        column.change(measure_type=MeasureType.CONTINUOUS)
+                        column[row_start + j] = value
+                    elif isinstance(value, str) and column.auto_measure:
+                        column.change(measure_type=MeasureType.NOMINAL_TEXT)
                         column.clear_at(row_start + j)  # necessary to clear first with NOMINAL_TEXT
-                        value = cell.s
                         index = column.level_count
                         column.insert_level(index, value)
                         column[row_start + j] = index
@@ -613,12 +1008,42 @@ class Instance:
             elif column.measure_type == MeasureType.CONTINUOUS:
                 column.determine_dps()
 
-            if changes != column.changes:
-                response.incSchema = True
-                schema = response.schema.add()
-                self._populate_column_schema(column, schema)
+            if changes != column.changes or was_virtual:
+                cols_w_schema_change.add(column)
 
-            self._data.dataset.is_edited = True
+            dependents = column.dependents
+            recalc.update(dependents)
+            cols_w_schema_change.update(dependents)
+
+        self._data.is_edited = True
+
+        for i in range(n_cols_before, self._data.virtual_column_count):  # cols added
+            column = self._data[i]
+            cols_w_schema_change.add(column)
+
+        response.schema.rowCount = self._data.row_count
+        response.schema.vRowCount = self._data.virtual_row_count
+        response.schema.columnCount = self._data.column_count
+        response.schema.vColumnCount = self._data.virtual_column_count
+
+        if n_rows_before != self._data.row_count:
+            recalc = self._data  # if more rows recalc all
+            cols_w_schema_change = self._data  # send *all* column schemas
+        else:
+            # sort ascending (the client doesn't like them out of order)
+            cols_w_schema_change = sorted(cols_w_schema_change, key=lambda x: x.index)
+
+        for column in recalc:
+            column.needs_recalc = True
+        for column in recalc:
+            column.recalc()
+
+        for column in cols_w_schema_change:
+            response.incSchema = True
+            columnPB = response.schema.columns.add()
+            self._populate_column_schema(column, columnPB)
+
+        self._populate_cells(request, response)
 
     def _auto_adjust(self, column):
         if column.measure_type == MeasureType.NOMINAL_TEXT:
@@ -628,7 +1053,7 @@ class Instance:
                 except ValueError:
                     break
             else:
-                column.change(MeasureType.NOMINAL)
+                column.change(measure_type=MeasureType.NOMINAL)
                 return
 
             for level in column.levels:
@@ -637,7 +1062,7 @@ class Instance:
                 except ValueError:
                     break
             else:
-                column.change(MeasureType.CONTINUOUS)
+                column.change(measure_type=MeasureType.CONTINUOUS)
                 return
 
         elif column.measure_type == MeasureType.CONTINUOUS:
@@ -647,60 +1072,74 @@ class Instance:
                 if round(value) != round(value, 6):
                     break
             else:
-                column.change(MeasureType.NOMINAL)
+                column.change(measure_type=MeasureType.NOMINAL)
                 return
 
             column.determine_dps()
 
     def _populate_cells(self, request, response):
 
-        row_start = request.rowStart
-        col_start = request.columnStart
-        row_end   = request.rowEnd
-        col_end   = request.columnEnd
+        row_start = response.rowStart
+        col_start = response.columnStart
+        row_end   = response.rowEnd
+        col_end   = response.columnEnd
         row_count = row_end - row_start + 1
         col_count = col_end - col_start + 1
 
         for c in range(col_start, col_start + col_count):
-            column = self._data.dataset[c]
+            column = self._data[c]
 
             col_res = response.data.add()
 
             if column.measure_type == MeasureType.CONTINUOUS:
                 for r in range(row_start, row_start + row_count):
                     cell = col_res.values.add()
-                    value = column[r]
-                    if math.isnan(value):
+                    if r >= column.row_count:
                         cell.o = jcoms.SpecialValues.Value('MISSING')
                     else:
-                        cell.d = value
+                        value = column[r]
+                        if math.isnan(value):
+                            cell.o = jcoms.SpecialValues.Value('MISSING')
+                        else:
+                            cell.d = value
             elif column.measure_type == MeasureType.NOMINAL_TEXT:
                 for r in range(row_start, row_start + row_count):
                     cell = col_res.values.add()
-                    value = column[r]
-                    if value == '':
+                    if r >= column.row_count:
                         cell.o = jcoms.SpecialValues.Value('MISSING')
                     else:
-                        cell.s = value
+                        value = column[r]
+                        if value == '':
+                            cell.o = jcoms.SpecialValues.Value('MISSING')
+                        else:
+                            cell.s = value
             else:
                 for r in range(row_start, row_start + row_count):
                     cell = col_res.values.add()
-                    value = column[r]
-                    if value == -2147483648:
+                    if r >= column.row_count:
                         cell.o = jcoms.SpecialValues.Value('MISSING')
                     else:
-                        cell.i = value
+                        value = column[r]
+                        if value == -2147483648:
+                            cell.o = jcoms.SpecialValues.Value('MISSING')
+                        else:
+                            cell.i = value
 
     def _populate_schema(self, request, response):
         response.incSchema = True
-        for column in self._data.dataset:
-            column_schema = response.schema.add()
+        for column in self._data:
+            column_schema = response.schema.columns.add()
             self._populate_column_schema(column, column_schema)
+        response.schema.rowCount = self._data.row_count
+        response.schema.vRowCount = self._data.virtual_row_count
+        response.schema.columnCount = self._data.column_count
+        response.schema.vColumnCount = self._data.virtual_column_count
 
     def _populate_column_schema(self, column, column_schema):
         column_schema.name = column.name
         column_schema.importName = column.import_name
         column_schema.id = column.id
+        column_schema.index = column.index
 
         column_schema.measureType = column.measure_type.value
         column_schema.autoMeasure = column.auto_measure
@@ -709,15 +1148,21 @@ class Instance:
 
         column_schema.hasLevels = True
 
+        column_schema.columnType = column.column_type.value
+        column_schema.formula = column.formula
+        column_schema.formulaMessage = column.formula_message
+
         if column.measure_type is MeasureType.NOMINAL_TEXT:
             for level in column.levels:
                 level_pb = column_schema.levels.add()
                 level_pb.label = level[1]
+                level_pb.importValue = level[2]
         elif column.measure_type is MeasureType.NOMINAL or column.measure_type is MeasureType.ORDINAL:
             for level in column.levels:
                 level_pb = column_schema.levels.add()
                 level_pb.value = level[0]
                 level_pb.label = level[1]
+                level_pb.importValue = level[2]
 
     def _add_to_recents(self, path):
 
@@ -746,11 +1191,63 @@ class Instance:
 
     def _on_settings(self, request=None):
 
-        settings = Settings.retrieve('backstage')
+        settings = Settings.retrieve('main')
 
-        recents = settings.get('recents', [ ])
+        if request and request.settings:
+
+            settings_pb = request.settings
+
+            for setting_pb in settings_pb:
+                name = setting_pb.name
+                if setting_pb.valueType is jcoms.ValueType.Value('STRING'):
+                    value = setting_pb.s
+                elif setting_pb.valueType is jcoms.ValueType.Value('INT'):
+                    value = setting_pb.i
+                elif setting_pb.valueType is jcoms.ValueType.Value('DOUBLE'):
+                    value = setting_pb.d
+                elif setting_pb.valueType is jcoms.ValueType.Value('BOOL'):
+                    value = setting_pb.b
+                else:
+                    continue
+
+                if name == 'updateStatus':
+                    Instance._update_status_req(value)
+                else:
+                    settings.set(name, value)
+
+            settings.sync()
+
+            for instanceId, instance in Instance.instances.items():
+                if instance is not self and instance.is_active:
+                    instance._on_settings()
 
         response = jcoms.SettingsResponse()
+
+        setting_pb = response.settings.add()
+        setting_pb.name = 'updateStatus'
+        setting_pb.s = Instance._update_status
+
+        for name in settings:
+            value = settings.get(name)
+            if isinstance(value, str):
+                setting_pb = response.settings.add()
+                setting_pb.name = name
+                setting_pb.s = value
+            elif isinstance(value, bool):
+                setting_pb = response.settings.add()
+                setting_pb.name = name
+                setting_pb.b = value
+            elif isinstance(value, int):
+                setting_pb = response.settings.add()
+                setting_pb.name = name
+                setting_pb.i = value
+            elif isinstance(value, float):
+                setting_pb = response.settings.add()
+                setting_pb.name = name
+                setting_pb.d = value
+
+        settings = Settings.retrieve('backstage')
+        recents = settings.get('recents', [ ])
 
         for recent in recents:
             recent_pb = response.recents.add()
@@ -776,16 +1273,26 @@ class Instance:
         self._coms.send(response, self._instance_id, request)
 
     def _module_to_pb(self, module, module_pb):
+
+        version = module.version
+        version = version[:4]
+        version.extend((4 - len(version)) * [0])
+        version = int.from_bytes(version, 'big')
+
+        min_version = module.min_app_version
+        min_version = min_version[:4]
+        min_version.extend((4 - len(min_version)) * [0])
+        min_version = int.from_bytes(min_version, 'big')
+
         module_pb.name = module.name
         module_pb.title = module.title
-        module_pb.version.major = module.version[0]
-        module_pb.version.minor = module.version[1]
-        module_pb.version.revision = module.version[2]
+        module_pb.version = version
         module_pb.description = module.description
         module_pb.authors.extend(module.authors)
         module_pb.path = module.path
         module_pb.isSystem = module.is_sys
         module_pb.new = module.new
+        module_pb.minAppVersion = min_version
 
         for analysis in module.analyses:
             analysis_pb = module_pb.analyses.add()
@@ -800,3 +1307,44 @@ class Instance:
     def _on_engine_event(self, event):
         if event['type'] == 'terminated' and self._coms is not None:
             self._coms.close()
+
+    class LogHandler(logging.Handler):
+        def __init__(self, instance):
+            self._instance = instance
+            logging.Handler.__init__(self)
+
+        def emit(self, record):
+            if self._instance._coms is None:
+                return
+
+            filename = os.path.basename(record.pathname)
+            message = '{} ({}): {}'.format(filename, record.lineno, record.getMessage())
+            broadcast = jcoms.LogRR(
+                content=message)
+            self._instance._coms.send(broadcast, self._instance._instance_id)
+
+    class GarbageCollector:
+
+        def __init__(self):
+            self._stopped = False
+            self._thread = Thread(target=self.run)
+            self._thread.start()
+
+        def run(self):
+            parent = threading.main_thread()
+
+            while True:
+                time.sleep(.3)
+                if self._stopped is True:
+                    break
+                if parent.is_alive() is False:
+                    break
+                for id, instance in Instance.instances.items():
+                    if instance.inactive_for > 2:
+                        log.info('cleaning up: ' + str(id))
+                        instance.close()
+                        del Instance.instances[id]
+                        break
+
+        def stop(self):
+            self._stopped = True

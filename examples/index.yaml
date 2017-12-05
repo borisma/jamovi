@@ -11,3 +11,6 @@
   path: Bugs (Ryan, Wilde & Crist, 2013).csv
   description: A repeated measures ANOVA data set
 
+- name: Anderson's Iris Data
+  path: iris.csv
+  description: The 'iris' data set from R

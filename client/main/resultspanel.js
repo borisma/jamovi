@@ -8,7 +8,12 @@ const clipboard = require('clipboard-js');
 const formatIO = require('./utils/formatio');
 
 const Menu = require('./menu');
+const ContextMenus = require('./contextmenu/contextmenus');
+const ContextMenu = require('./contextmenu');
 const Notify = require('./notification');
+const host = require('./host');
+
+const b64 = require('../common/utils/b64');
 
 const ResultsPanel = Backbone.View.extend({
     className: 'ResultsPanel',
@@ -17,11 +22,26 @@ const ResultsPanel = Backbone.View.extend({
         this.$el.empty();
         this.$el.addClass('silky-results-panel');
 
-        this.$menu = $('<div></div>');
-        this.menu = new Menu(this.$menu);
-        $('body').append(this.$menu);
+        this._menuId = null;
+        ContextMenu.$el.on('menuClicked', (event, button) => {
+            if (this._menuId !== null)
+                this._menuEvent(button.eventData);
+        });
 
-        this.menu.onMenuEvent(entry => this._menuEvent(entry));
+        ContextMenu.on('menu-closed', (event) => {
+            if (this._menuId !== null) {
+                this._menuEvent({ type: 'activated', address: null });
+                this._menuId = null;
+
+                if (event !== undefined) {
+                    if (event.button === 2) {
+                        let resource = this._tryGetResource(event.pageX, event.pageY);
+                        if (resource !== null)
+                            this._resultsRightClicked(event.offsetX - resource.$container.offset().left, event.offsetY - resource.$container.offset().top, resource.analysis);
+                    }
+                }
+            }
+        });
 
         this.resources = { };
 
@@ -40,6 +60,9 @@ const ResultsPanel = Backbone.View.extend({
             if (this.model.attributes.selectedAnalysis !== null)
                 this.model.set('selectedAnalysis', null);
         });
+
+        this.model.settings().on('change:format',  () => this._updateAll());
+        this.model.settings().on('change:devMode', () => this._updateAll());
     },
     _resultsEvent(analysis) {
 
@@ -84,11 +107,13 @@ const ResultsPanel = Backbone.View.extend({
             $cover.on('click', event => this._resultsClicked(event, analysis));
             $cover.on('mousedown', event => {
                 if (event.button === 2)
-                    this._resultsRightClicked(event, analysis);
+                    this._resultsRightClicked(event.offsetX, event.offsetY, analysis);
             });
         }
         else if (analysis.deleted) {
-            resources.$container.css('height', '0');
+            let $container = resources.$container;
+            $container.css('height', '0');
+            $container.one('transitionend', () => $container.hide());
         }
         else {
 
@@ -101,15 +126,50 @@ const ResultsPanel = Backbone.View.extend({
     _sendResults(resources) {
 
         if (this.mode === 'rich' || resources.incAsText) {
+
+            let format;
+            try {
+                format = JSON.parse(this.model.settings().get('format'));
+            }
+            catch (e) {
+                format = {t:'sf',n:3,p:3};
+            }
+
             let event = {
                 type: 'results',
                 data: {
                     results: resources.results,
-                    mode: this.mode
+                    mode: this.mode,
+                    devMode: this.model.settings().get('devMode'),
+                    format: format,
                 }
             };
             resources.iframe.contentWindow.postMessage(event, this.iframeUrl);
         }
+    },
+    _updateAll() {
+
+        for (let id in this.resources) {
+            let resources = this.resources[id];
+            if (resources === undefined)
+                continue;
+            if (resources.analysis.deleted)
+                continue;
+            if (resources.loaded === false)
+                continue;
+            this._sendResults(resources);
+        }
+
+    },
+
+    _tryGetResource(xpos, ypos) {
+        for (let id in this.resources) {
+            let $container = this.resources[id].$container;
+            let offset = $container.offset();
+            if (xpos >= offset.left && xpos <= offset.left + $container.width() && ypos >= offset.top && ypos <= offset.top + $container.height())
+                return this.resources[id];
+        }
+        return null;
     },
     _resultsClicked(event, analysis) {
         event.stopPropagation();
@@ -119,12 +179,12 @@ const ResultsPanel = Backbone.View.extend({
         else
             this.model.set('selectedAnalysis', null);
     },
-    _resultsRightClicked(event, analysis) {
+    _resultsRightClicked(offsetX, offsetY, analysis) {
         let selected = this.model.attributes.selectedAnalysis;
-        if (selected === null || selected === analysis) {
+        if ((selected === null && analysis !== null) || selected === analysis) {
             let resources = this.resources[analysis.id];
             let iframe = resources.iframe;
-            let clickEvent = $.Event('click', { button: 2, pageX: event.offsetX, pageY: event.offsetY, bubbles: true });
+            let clickEvent = $.Event('click', { button: 2, pageX: offsetX, pageY: offsetY, bubbles: true });
             iframe.contentWindow.postMessage(clickEvent, this.iframeUrl);
         }
         else {
@@ -138,6 +198,9 @@ const ResultsPanel = Backbone.View.extend({
             let resources = this.resources[id];
             if (event.source !== resources.iframe.contentWindow)
                 continue;
+
+            if (resources.analysis.deleted)
+                return;
 
             let payload = event.data;
             let eventType = payload.type;
@@ -179,6 +242,7 @@ const ResultsPanel = Backbone.View.extend({
                     let options = { };
                     options[eventData.name] = eventData.value;
                     analysis.setOptions(options);
+                    break;
             }
         }
     },
@@ -187,35 +251,98 @@ const ResultsPanel = Backbone.View.extend({
         this._menuId = id;
 
         let entries = [ ];
-        for (let entry of data.entries)
-            entries.push({ label: entry.type, address: entry.address, options: entry.options });
-
-        if (entries.length > 0) {
-            let lastEntry = entries[entries.length-1];
-            lastEntry.active = true;
+        for (let entry of data.entries) {
+            let e = {
+                label: entry.type,
+                type: entry.type,
+                address: entry.address,
+                options: entry.options,
+                title: entry.title,
+            };
+            entries.push(e);
         }
 
-        this.menu.setup(entries);
-        this.menu.show({ clickPos : { top: data.pos.top, left: data.pos.left } });
+        ContextMenu.showResultsMenu(entries, data.pos.left, data.pos.top);
+    },
+    _getElement(address, id) {
+        if (id === undefined)
+            id = this._menuId;
+        let $results = $(this.resources[id].iframe.contentWindow.document).find('#results');
+        for (let i = 0; i < address.length; i++)
+            $results = $results.find('[data-name="' + b64.enc(address[i]) + '"]').first();
+        return $results;
+    },
+    getAsHTML(options, part) {
+        if ( ! part)
+            return formatIO.exportElem(this.$el, 'text/html', options);
+
+        let address = part.split('/');
+        let id = address.shift();
+        let $element = this._getElement(address, id);
+
+        return formatIO.exportElem($element, 'text/html', options);
     },
     _menuEvent(event) {
 
+        let type = (this.mode === 'rich' ? 'text/html' : 'text/plain');
+
         if (event.op === 'copy') {
-            let $results = $(this.resources[this._menuId].iframe.contentWindow.document).find('#results');
-            for (let i = 1; i < event.address.length; i++)
-                $results = $results.find('[data-name="' + btoa(event.address[i]) + '"]').first();
 
-            let type = (this.mode === 'rich' ? 'text/html' : 'text/plain');
-            let content = formatIO.exportElem($results, type);
+            let $results = this._getElement(event.address);
 
-            clipboard.copy({ [ type ]: content }).then(() => {
+            formatIO.exportElem($results, type).then((content) => {
+
+                return clipboard.copy({ [ type ]: content });
+
+            }).then(() => {
                 let note = new Notify({
                     title: 'Copied',
                     message: 'The content has been copied to the clipboard',
-                    duration: 2000 });
+                    duration: 2000,
+                    type: 'success'
+                });
 
                 this.model.trigger('notification', note);
             });
+        }
+        else if (event.op === 'save') {
+
+            let part = '' + this._menuId;
+            if (event.address.length > 0)
+                part += '/' + event.address.join('/');
+
+            if (event.target.type === 'Image') {
+                let options = {
+                    title: 'Save image',
+                    filters: [
+                        { name: 'PDF', extensions: [ 'pdf' ] },
+                        { name: 'PNG', extensions: [ 'png' ] },
+                        { name: 'SVG', extensions: [ 'svg' ] },
+                        { name: 'EPS', extensions: [ 'eps' ] }, ]
+                };
+
+                let path = host.showSaveDialog(options);
+                if (path) {
+                    path = path.replace(/\\/g, '/');  // convert to non-windows path
+                    this.model.save(path, { name: 'Image', export: true, part: part, partType: 'image' }, true);
+                }
+            }
+            else {
+
+                let options = {
+                    title: 'Save results',
+                    filters: [
+                        { name: 'PDF', extensions:  [ 'pdf' ] },
+                        { name: 'HTML', extensions: [ 'html', 'htm' ] },
+                    ]
+                };
+
+                let path = host.showSaveDialog(options);
+                if (path) {
+                    path = path.replace(/\\/g, '/');  // convert to non-windows path
+                    this.model.save(path, { name: 'Image', export: true, part: part }, true);
+                }
+            }
         }
         else if (event.op === 'remove') {
             this.model.set('selectedAnalysis', null);

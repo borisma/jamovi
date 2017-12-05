@@ -3,7 +3,7 @@
 const $ = require('jquery');
 const Backbone = require('backbone');
 Backbone.$ = $;
-const determineFormatting = require('../common/formatting').determineFormatting;
+const determFormat = require('../common/formatting').determFormat;
 const format = require('../common/formatting').format;
 
 const Elem = require('./element');
@@ -15,7 +15,8 @@ const SUPSCRIPTS = ["\u1D43", "\u1D47", "\u1D48", "\u1D49", "\u1DA0", "\u1D4D", 
 const Format = {
     BEGIN_GROUP: 1,
     END_GROUP: 2,
-    NEGATIVE: 4
+    NEGATIVE: 4,
+    INDENTED: 8,
 };
 
 const extractCellValue = function(cellPB) {
@@ -50,8 +51,8 @@ const createSortTransform = function(column, dir) {
 
 const TableModel = Backbone.Model.extend({
     defaults : {
-        name: "name",
-        title: "(no title)",
+        name:  'name',
+        title: '(no title)',
         element : {
             columns : [ ]
         },
@@ -130,7 +131,7 @@ const TableView = Elem.View.extend({
 
         Elem.View.prototype.initialize.call(this, data);
 
-        this.$el.addClass('silky-results-table');
+        this.$el.addClass('jmv-results-table');
 
         if (this.model === null)
             this.model = new TableModel();
@@ -145,15 +146,15 @@ const TableView = Elem.View.extend({
 
             let rowSelectable = table.rowSelect ? ' row-selectable' : '';
 
-            this.$table = $('<table class="silky-results-table-table' + rowSelectable + '"></table>').appendTo(this.$el);
+            this.$table = $('<table class="jmv-results-table-table' + rowSelectable + '"></table>').appendTo(this.$el);
             this.$tableHeader = $('<thead></thead>').appendTo(this.$table);
-            this.$titleRow = $('<tr class="silky-results-table-title-row"></tr>').appendTo(this.$tableHeader);
-            this.$titleCell = $('<th class="silky-results-table-title-cell" colspan="1">').appendTo(this.$titleRow);
-            this.$titleText = $('<span class="silky-results-table-title-text"></span>').appendTo(this.$titleCell);
-            this.$status = $('<div class="silky-results-table-status-indicator"></div>').appendTo(this.$titleCell);
+            this.$titleRow = $('<tr class="jmv-results-table-title-row"></tr>').appendTo(this.$tableHeader);
+            this.$titleCell = $('<th class="jmv-results-table-title-cell" colspan="1">').appendTo(this.$titleRow);
+            this.$titleText = $('<span class="jmv-results-table-title-text"></span>').appendTo(this.$titleCell);
+            this.$status = $('<div class="jmv-results-table-status-indicator"></div>').appendTo(this.$titleCell);
 
-            this.$columnHeaderRowSuper = $('<tr class="silky-results-table-header-row-super"></tr>').appendTo(this.$tableHeader);
-            this.$columnHeaderRow      = $('<tr class="silky-results-table-header-row-main"></tr>').appendTo(this.$tableHeader);
+            this.$columnHeaderRowSuper = $('<tr class="jmv-results-table-header-row-super"></tr>').appendTo(this.$tableHeader);
+            this.$columnHeaderRow      = $('<tr class="jmv-results-table-header-row-main"></tr>').appendTo(this.$tableHeader);
 
             this.$tableBody   = $('<tbody></tbody>').appendTo(this.$table);
             this.$tableFooter = $('<tfoot></tfoot>').appendTo(this.$table);
@@ -168,7 +169,7 @@ const TableView = Elem.View.extend({
             if (navigator.platform === "Win32")
                 text = text.replace(/\u273B/g, '*');
 
-            let $pre = $('<pre class="silky-results-text silky-results-item"></pre>').appendTo(this.$el);
+            let $pre = $('<pre class="jmv-results-text jmv-results-item"></pre>').appendTo(this.$el);
             $pre.text(text);
         }
     },
@@ -176,6 +177,8 @@ const TableView = Elem.View.extend({
         return 'Table';
     },
     render() {
+
+        Elem.View.prototype.render.call(this);
 
         let table = this.model.attributes.element;
         let columns = table.columns;
@@ -189,9 +192,9 @@ const TableView = Elem.View.extend({
         this._trs.off();
 
         if (this.model.attributes.status === 1)
-            this.$el.addClass('silky-results-status-inited');
+            this.$el.addClass('jmv-results-status-inited');
         else if (this.model.attributes.status === 2)
-            this.$el.addClass('silky-results-status-running');
+            this.$el.addClass('jmv-results-status-running');
 
         if (this.model.attributes.title)
             this.$titleText.text(this.model.attributes.title);
@@ -232,7 +235,7 @@ const TableView = Elem.View.extend({
             let classes = '';
             let format = column.format.split(',');
             if (format.includes('narrow'))
-                classes += ' silky-results-table-cell-format-narrow';
+                classes += ' jmv-results-table-cell-format-narrow';
 
             let name = column.name;
             let title = name;
@@ -247,12 +250,10 @@ const TableView = Elem.View.extend({
                 cells.superHeader[colNo] = { value : column.superTitle, classes : '' };
 
             let values = column.cells.map(v => v.d);
-            formattings[colNo] = determineFormatting(values, column.type, column.format);
+            formattings[colNo] = determFormat(values, column.type, column.format, this.fmt);
 
             colNo++;
         }
-
-        let group = 0;
 
         for (let rowNo = 0; rowNo < rowCount; rowNo++) {
 
@@ -263,10 +264,6 @@ const TableView = Elem.View.extend({
 
             let rowFormat = '';
 
-            let firstCell = sortedCells[0][rowNo];
-            if ((firstCell.format & Format.BEGIN_GROUP) == Format.BEGIN_GROUP)
-                group++;
-
             let colNo = 0;
             for (let sourceColNo = 0; sourceColNo < columns.length; sourceColNo++) {
                 let sourceColumn = columns[sourceColNo];
@@ -276,10 +273,16 @@ const TableView = Elem.View.extend({
 
                 let sourceCell = sourceCells[rowNo];
 
-                let cell = { value : null, classes : rowFormat, sups : '', group : group };
+                let cell = { value : null, classes : rowFormat, sups : '' };
 
                 if (sourceCell.format & Format.NEGATIVE)
-                    cell.classes += ' silky-results-table-cell-negative';
+                    cell.classes += ' jmv-results-table-cell-negative';
+
+                if (sourceCell.format & Format.INDENTED)
+                    cell.classes += ' jmv-results-table-cell-indented';
+
+                if ((sourceCell.format & Format.BEGIN_GROUP) === Format.BEGIN_GROUP)
+                    cell.beginGroup = true;
 
                 cell.visible = isVis(sourceColumn);
 
@@ -326,9 +329,6 @@ const TableView = Elem.View.extend({
 
                 colNo++;
             }
-
-            if ((firstCell.format & Format.END_GROUP) == Format.END_GROUP)
-                group++;
         }
 
         let rowPlan = {};
@@ -391,16 +391,37 @@ const TableView = Elem.View.extend({
                         let index = foldedIndices[fold];
                         let row = folded.body[rowNo * nFolds + fold];
                         let cell = cells.body[rowNo][index];
-                        if (cell.group === 0)
-                            cell.group = rowNo;
                         row[colNo] = cell;
                     }
+                }
+            }
+
+            // add spacing around the folds
+
+            for (let rowNo = 0; rowNo < folded.body.length; rowNo += nFolds) {
+                let row = folded.body[rowNo];
+                for (let colNo = 0; colNo < row.length; colNo++) {
+                    let cell = row[colNo];
+                    if (cell)
+                        cell.beginGroup = true;
                 }
             }
 
             cells.header = folded.header;
             cells.superHeader = folded.superHeader;
             cells.body = folded.body;
+        }
+
+        for (let rowNo = 0; rowNo < cells.body.length; rowNo++) {
+            let row = cells.body[rowNo];
+            let first = row[0];
+            if (first && first.beginGroup) {
+                for (let colNo = 1; colNo < row.length; colNo++) {
+                    let cell = row[colNo];
+                    if (cell)
+                        cell.beginGroup = true;
+                }
+            }
         }
 
         if (cells.body.length > 1 && cells.body[0].length > 0) {
@@ -439,14 +460,12 @@ const TableView = Elem.View.extend({
             for (let colNo = 0; colNo < cells.header.length - 1; colNo++) {
                 swapped.body[colNo] = new Array(cells.body.length + 1);
                 let cell = cells.header[colNo + 1];
-                cell.group = 0;
                 swapped.body[colNo][0] = cell;
             }
             //fix body
             for (let rowNo = 0; rowNo < swapped.body.length; rowNo++) {
-                for (let colNo = 1; colNo < swapped.body[rowNo].length; colNo++) {
+                for (let colNo = 1; colNo < swapped.body[rowNo].length; colNo++)
                     swapped.body[rowNo][colNo] = cells.body[colNo - 1][rowNo + 1];
-                }
             }
 
             cells.header = swapped.header;
@@ -478,7 +497,7 @@ const TableView = Elem.View.extend({
                     span++;
                 }
                 else {
-                    html += '<th class="silky-results-table-cell" colspan="' + (2 * span) + '">' + content + '</th>';
+                    html += '<th class="jmv-results-table-cell" colspan="' + (2 * span) + '">' + content + '</th>';
                     span = 1;
                 }
             }
@@ -506,7 +525,7 @@ const TableView = Elem.View.extend({
                 }
                 sortStuff = ' <button class="' + asc + '" data-name="' + head.name + '"></button><button class="' + desc + '" data-name="' + head.name + '"></button>';
             }
-            html += '<th class="silky-results-table-cell' + classes + '" colspan="2">' + content + sortStuff + '</th>';
+            html += '<th class="jmv-results-table-cell' + classes + '" colspan="2">' + content + sortStuff + '</th>';
         }
 
         this.$columnHeaderRow.html(html);
@@ -528,9 +547,6 @@ const TableView = Elem.View.extend({
 
         html = '';
 
-        let currentGroup = -1;
-        let prevGroup = -1;
-
         for (let rowNo = 0; rowNo < cells.body.length; rowNo++) {
 
             let rowHtml = '';
@@ -543,29 +559,25 @@ const TableView = Elem.View.extend({
                     let content = cell.value;
                     let classes = cell.classes;
 
-                    if (cell.group !== prevGroup) {
-                        currentGroup = cell.group;
-                        classes += ' silky-results-table-cell-group-begin';
-                    }
+                    if (cell.beginGroup)
+                        classes += ' jmv-results-table-cell-group-begin';
 
                     if (content === '')
                         content = '&nbsp;';
-                    if (cell.sups && cell.classes.indexOf('silky-results-table-cell-text') !== -1) {
+                    if (cell.sups && cell.classes.indexOf('jmv-results-table-cell-text') !== -1) {
                         // place the superscript beside the content if left aligned
-                        rowHtml += '<td class="silky-results-table-cell ' + classes + '">' + content + ' ' + cell.sups + '</td>';
-                        rowHtml += '<td class="silky-results-table-cell silky-results-table-cell-sup"></td>';
+                        rowHtml += '<td class="jmv-results-table-cell ' + classes + '">' + content + ' ' + cell.sups + '</td>';
+                        rowHtml += '<td class="jmv-results-table-cell jmv-results-table-cell-sup"></td>';
                     }
                     else {
-                        rowHtml += '<td class="silky-results-table-cell ' + classes + '">' + content + '</td>';
-                        rowHtml += '<td class="silky-results-table-cell silky-results-table-cell-sup">' + (cell.sups ? cell.sups : '') + '</td>';
+                        rowHtml += '<td class="jmv-results-table-cell ' + classes + '">' + content + '</td>';
+                        rowHtml += '<td class="jmv-results-table-cell jmv-results-table-cell-sup">' + (cell.sups ? cell.sups : '') + '</td>';
                     }
                 }
                 else {
                     rowHtml += '<td colspan="2">&nbsp;</td>';
                 }
             }
-
-            prevGroup = currentGroup;
 
             let selected = '';
             let trans = this.model.attributes.sortTransform;
@@ -604,22 +616,27 @@ const TableView = Elem.View.extend({
             this.model.sort(columnName, 'desc');
         });
 
-        this._trs.on('click', event => {
-            let $row = $(event.target).closest(this._trs);
-            let rowNo = this._trs.index($row);
-            rowNo = this.model.attributes.sortTransform[rowNo];
-            window.setOption(table.rowSelect, rowNo);
-        });
+        if (table.rowSelect) {
+            this._trs.on('click', event => {
+                let $row = $(event.target).closest(this._trs);
+                let rowNo = this._trs.index($row);
+                rowNo = this.model.attributes.sortTransform[rowNo];
+                if (rowNo === table.rowSelected)
+                    window.setOption(table.rowSelect, -1);
+                else
+                    window.setOption(table.rowSelect, rowNo);
+            });
+        }
     },
     makeFormatClasses(column) {
 
-        let classes = ' silky-results-table-cell-' + (column.type ? column.type : 'number');
+        let classes = ' jmv-results-table-cell-' + (column.type ? column.type : 'number');
 
         if (column.format) {
             let formats = column.format.split(',');
             if (formats.length !== 1 || formats[0] !== '') {
                 for (let i = 0; i < formats.length; i++)
-                    formats[i] = 'silky-results-table-cell-format-' + formats[i];
+                    formats[i] = 'jmv-results-table-cell-format-' + formats[i];
                 classes += ' ' + formats.join(' ');
             }
         }

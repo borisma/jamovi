@@ -31,24 +31,40 @@ let analyses = instance.analyses();
 
 let backstageModel = new BackstageModel({ instance: instance });
 let modules = new Modules({ instance: instance });
-let ribbonModel = new RibbonModel({ modules: modules });
-
-ribbonModel.on('analysisSelected', function(info) {
-    analyses.createAnalysis(info.name, info.ns);
-});
-
-coms.on('broadcast', function(broadcast) {
-    if (broadcast.payloadType === 'SettingsResponse') {
-        let settings = coms.Messages.SettingsResponse.decode(broadcast.payload);
-        backstageModel.set('settings', settings);
-        modules.setup(settings.modules);
-    }
-});
+let ribbonModel = new RibbonModel({ modules: modules, settings: instance.settings() });
 
 coms.on('close', function() {
     window.alert('Connection lost\n\nThe processing engine has ended unexpectedly.\nThis jamovi window will now close down. Sorry for the inconvenience.\n\nIf you could report your experiences to the jamovi team, that would be appreciated.');
     host.closeWindow(true);
 });
+
+if (window.navigator.platform === 'MacIntel') {
+    host.constructMenu([
+        {
+            label: 'jamovi',
+            submenu: [
+                { role: 'about' },
+                { type: 'separator' },
+                { role: 'quit' },
+            ]
+        },
+        {
+            label: "Edit",
+            submenu: [
+                { label: "Cut", accelerator: "CmdOrCtrl+X", selector: "cut:" },
+                { label: "Copy", accelerator: "CmdOrCtrl+C", selector: "copy:" },
+                { label: "Paste", accelerator: "CmdOrCtrl+V", selector: "paste:" },
+            ]
+        },
+    ]);
+}
+
+// prevent back navigation
+history.pushState(null, null, document.URL);
+window.addEventListener('popstate', function () {
+    history.pushState(null, null, document.URL);
+});
+
 
 $(document).ready(() => {
 
@@ -77,13 +93,16 @@ $(document).ready(() => {
     }
 
     document.oncontextmenu = function() { return false; };
+
+    // note: in linux, as of electron 1.7.9, the drop event is never fired,
+    // so we handle the navigate event in the electron app
     document.ondragover = (event) => {
-        if (event.dataTransfer.files) {
+        if (event.dataTransfer.files.length > 0) {
             event.dataTransfer.dropEffect = 'copy';
             event.preventDefault();
         }
     };
-    document.body.ondrop = (event) => {
+    document.ondrop = (event) => {
         for (let file of event.dataTransfer.files)
             instance.open(file.path);
         event.preventDefault();
@@ -92,12 +111,14 @@ $(document).ready(() => {
     let ribbon = new Ribbon({ el : '.silky-ribbon', model : ribbonModel });
     let backstage = new Backstage({ el : "#backstage", model : backstageModel });
 
-    ribbonModel.on('change:selectedIndex', function(event) {
-        if (event.changed.selectedIndex === 0)
-            backstage.activate();
+    ribbon.on('analysisSelected', function(analysis) {
+        analyses.createAnalysis(analysis.name, analysis.ns);
     });
 
-    ribbonModel.on('toggleResultsMode', () => instance.toggleResultsMode());
+    ribbon.on('tabSelected', function(tabName) {
+        if (tabName === 'file')
+            backstage.activate();
+    });
 
     let halfWindowWidth = 585 + SplitPanelSection.sepWidth;
     let optionsFixedWidth = 585;
@@ -119,6 +140,10 @@ $(document).ready(() => {
         else {
             optionspanel.hideOptions();
         }
+    });
+
+    instance.on("moduleInstalled", (event) => {
+        optionspanel.reloadAnalyses(event.name);
     });
 
     let $fileName = $('.header-file-name');
@@ -144,8 +169,6 @@ $(document).ready(() => {
 
     backstageModel.on('change:activated', function(event) {
         mainTable.setActive( ! event.changed.activated);
-        if (event.changed.activated === false)
-            ribbonModel.set('selectedIndex', 1);
     });
 
     let resultsView = new ResultsView({ el : "#results", iframeUrl : host.resultsViewUrl, model : instance });
@@ -203,14 +226,18 @@ $(document).ready(() => {
         let instanceId;
         if (window.location.search.indexOf('?id=') !== -1)
             instanceId = window.location.search.split('?id=')[1];
+        else
+            resultsView.showWelcome();
 
         return instance.connect(instanceId);
 
     }).then(instanceId => {
 
         let toOpen = '';  // '' denotes blank data set
-        if (window.location.search.indexOf('?open=') !== -1)
+        if (window.location.search.indexOf('?open=') !== -1) {
             toOpen = window.location.search.split('?open=')[1];
+            toOpen = decodeURI(toOpen);
+        }
 
         let newUrl = window.location.origin + window.location.pathname + '?id=' + instanceId;
         history.replaceState({}, '', newUrl);
@@ -223,20 +250,5 @@ $(document).ready(() => {
         if ( ! instance.get('hasDataSet'))
             return instance.open('');
 
-    }).then(() => {
-
-        let settings = new coms.Messages.SettingsRequest();
-        let request = new coms.Messages.ComsMessage();
-        request.payload = settings.toArrayBuffer();
-        request.payloadType = 'SettingsRequest';
-        request.instanceId = instance.instanceId();
-
-        return coms.send(request);
-
-    }).then(response => {
-
-        let settings = coms.Messages.SettingsResponse.decode(response.payload);
-        backstageModel.set('settings', settings);
-        modules.setup(settings.modules);
     });
 });

@@ -5,40 +5,142 @@
     z-index: 101 ;
 }
 
-.jmv-ribbon-appmenu-menu {
-    position: absolute ;
-    display: none ;
-    right: 0px ;
-    top: 3px ;
+.jmv-ribbon-appmenu-menu-panel {
+    position: fixed ;
+    display: flex;
+    right: -1px ;
+    top: 0px ;
+    width: 0px;
+    bottom: 0px;
     background-color: #F4F4F4 ;
     color: #555555 ;
     margin: 0 ;
-    box-shadow: 0px 1px 1px 1px rgba(172, 172, 172, 1);
-    margin-top: 2px ;
+    transition: .15s width ease-out;
+    border-left: 1px solid #D0D0D0;
+}
+
+body.windows .jmv-ribbon-appmenu-menu-panel {
+    top: 33px ;
+}
+
+.jmv-ribbon-appmenu-menu-panel.activated {
+    width: 250px;
+}
+
+.jmv-ribbon-appmenu-menu {
+    display: flex ;
+    overflow: hidden;
+    margin: 0 ;
     font-size: 70% ;
-    border-radius: 1px ;
+    text-align: left ;
+    flex-direction: column;
+    min-width: 250px;
 }
 
-.jmv-ribbon-appmenu-menu > * {
-    padding: 12px 6px ;
+.jmv-ribbon-appmenu-header {
+    display: flex ;
+    justify-content: space-between;
+    height: 50px;
+    /*background-color: #D0D0D0 ;*/
 }
 
-.jmv-ribbon-appmenu-syntaxmode {
+.jmv-ribbon-appmenu-icon {
+    width: 45px;
+    background-image: url('assets/logo-v-naked.svg');
+    background-size: 30px;
+    background-repeat: no-repeat;
+    background-position: center;
+}
+
+.jmv-ribbon-appmenu-back {
+    width: 45px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.jmv-ribbon-appmenu-back-button {
+    display: flex;
+    flex-flow: row nowrap;
+    align-items: center;
+    font-size: 15px;
+    height: 30px;
+    width: 30px;
+    box-sizing: border-box;
+}
+
+.jmv-ribbon-appmenu-back-button:hover > div {
+    background-color: #888888 ;
+}
+
+.jmv-ribbon-appmenu-back-button > div {
+    flex: 1;
+    mask: url('assets/action-back.svg') 0 0/25px 25px no-repeat;
+    background-color: #333333;
+    -webkit-mask: url('assets/action-back.svg');
+    -webkit-mask-repeat: no-repeat;
+    -webkit-mask-position: center;
+    -webkit-mask-size: 25px;
+    transform: rotate(180deg);
+    min-width: 25px;
+    height: 25px;
+}
+
+.jmv-ribbon-appmenu-content {
+    margin: 15px 0px;
+}
+
+.jmv-ribbon-appmenu-subheading {
+    padding: 8px 16px ;
+    font-weight: bold ;
+}
+
+.jmv-ribbon-appmenu-item {
+    display: flex ;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 16px ;
+}
+
+.jmv-ribbon-appmenu-item.checkbox:hover {
+    background-color: #E0E0E0;
+}
+
+.jmv-ribbon-appmenu-separator {
+    display: block ;
+    margin: 6px 8px ;
+    border-bottom: 1px solid #D0D0D0 ;
+}
+
+.jmv-ribbon-appmenu-checkbox {
     display: block ;
 }
 
-.jmv-ribbon-appmenu-zoom {
-    display: flex ;
-    justify-content: center;
-    border-bottom: 1px solid #ACACAC ;
-    margin: 0 ;
+input[type="checkbox"].jmv-ribbon-appmenu-checkbox {
+    margin-right: 0px;
 }
 
-.jmv-ribbon-appmenu-zoom > * {
-    margin-left: 4px ;
-    margin-right: 4px ;
+.jmv-ribbon-appmenu-list {
+    padding: 6px 12px ;
+}
+
+.jmv-ribbon-appmenu-list > * {
+    margin: 6px ;
+}
+
+.jmv-ribbon-appmenu-zoom-buttons {
+    display: flex ;
+    justify-content: center;
+}
+
+.jmv-ribbon-appmenu-zoom-buttons > * {
     height: 24px ;
     line-height: 24px ;
+}
+
+.jmv-ribbon-appmenu-zoomlevel {
+    margin-left: 8px ;
+    margin-right: 8px ;
 }
 
 .jmv-ribbon-appmenu-zoomin,
@@ -46,10 +148,22 @@
     border: 1px solid #ACACAC ;
     width: 30px ;
     border-radius: 1px ;
+    text-align: center ;
 }
 
 .jmv-ribbon-appmenu-zoomin:hover,
 .jmv-ribbon-appmenu-zoomout:hover,
-.jmv-ribbon-appmenu-syntaxmode:hover {
+.jmv-ribbon-appmenu-checkbox:hover {
     background-color: #E0E0E0 ;
+}
+
+.jmv-ribbon-appmenu-spacer {
+    flex-grow: 1;
+}
+
+.jmv-ribbon-appmenu-version {
+    height: 45px;
+    text-align: center;
+    vertical-align: middle;
+    line-height: 45px;
 }

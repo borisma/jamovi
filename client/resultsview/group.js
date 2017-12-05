@@ -31,16 +31,20 @@ const GroupView = Elem.View.extend({
         this.create = data.create;
         this.children = [ ];
         this.mode = data.mode;
+        this.devMode = data.devMode;
+        this.fmt = data.fmt;
 
         this.hoTag = '<h'  + (this.level+1) + '>';
         this.hcTag = '</h' + (this.level+1) + '>';
 
-        this.$el.addClass('silky-results-group');
+        this.$el.addClass('jmv-results-group');
 
         if (this.mode === 'text')
-            this.$title = $(this.hoTag + '# ' + this.model.attributes.title + this.hcTag).appendTo(this.$el);
+            this.$title = $(this.hoTag + '# ' + this.model.attributes.title + this.hcTag).prependTo(this.$el);
         else
-            this.$title = $(this.hoTag + this.model.attributes.title + this.hcTag).appendTo(this.$el);
+            this.$title = $(this.hoTag + this.model.attributes.title + this.hcTag).prependTo(this.$el);
+
+        this.$container = $('<div class="jmv-results-group-container"></div>').appendTo(this.$el);
 
         this.render();
     },
@@ -69,31 +73,25 @@ const GroupView = Elem.View.extend({
     },
     render: function() {
 
-        let error = this.model.get('error');
-        if (error !== null) {
-            let $errorPlacement = $('<div class="silky-results-error-placement"></div>');
-            let $error = $('<div class="silky-results-error-message"></div>');
-            $error.append(error.message);
-            $errorPlacement.append($error);
-            this.$el.append($errorPlacement);
-            this.$el.addClass('silky-results-error');
-        }
+        Elem.View.prototype.render.call(this);
 
         let promises = [ ];
         let elements = this.model.attributes.element.elements;
 
         for (let element of elements) {
-            if (this.mode === 'rich' && element.syntax)
+            if (this.mode === 'rich' && element.name === 'syntax' && element.type === 'preformatted')
+                continue;
+            if ( ! this.devMode && element.name === 'debug' && element.type === 'preformatted')
                 continue;
             if (element.visible === 1 || element.visible === 3)
                 continue;
 
             let $el = $('<div></div>');
-            let child = this.create(element, $el, this.level+1, this, this.mode);
+            let child = this.create(element, $el, this.level+1, this, this.mode, undefined, this.fmt);
             if (child !== null) {
                 this.children.push(child);
-                $el.appendTo(this.$el);
-                $('<br>').appendTo(this.$el);
+                $el.appendTo(this.$container);
+                $('<br>').appendTo(this.$container);
                 promises.push(child);
             }
         }

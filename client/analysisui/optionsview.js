@@ -1,17 +1,17 @@
 'use strict';
 
-var _ = require('underscore');
-var $ = require('jquery');
+const _ = require('underscore');
+const $ = require('jquery');
 
-var OptionControlBase = require('./optioncontrolbase');
-var ControlContainer = require('./controlcontainer');
-var DefaultControls = require('./defaultcontrols');
-var Backbone = require('backbone');
+const OptionControlBase = require('./optioncontrolbase');
+const ControlContainer = require('./controlcontainer').container;
+const DefaultControls = require('./defaultcontrols');
+const Backbone = require('backbone');
+const Opt = require('./option');
 
+const OptionsView = function(uiModel) {
 
-var OptionsView = function(uiModel) {
-
-    _.extend(this, Backbone.Events);
+    Object.assign(this, Backbone.Events);
 
     this.$el = $('<div class="silky-options-content"></div>');
 
@@ -21,13 +21,14 @@ var OptionsView = function(uiModel) {
     this._initializingData = 0;
 
     this.render = function() {
-        var options = this.model.options;
-        var layoutDef = this.model.ui;
+        let options = this.model.options;
+        let layoutDef = this.model.ui;
 
         if (layoutDef.stage <= this.model.currentStage) {
             this.layoutActionManager = this.model.actionManager;
 
-            var layoutGrid = new ControlContainer(layoutDef);
+            layoutDef._parentControl = null;
+            let layoutGrid = new ControlContainer(layoutDef);
             layoutGrid.$el.addClass('top-level');
             layoutGrid.setMinimumWidth(this.$el.width() - layoutGrid.getScrollbarWidth());
             layoutGrid.setMaximumWidth(this.$el.width() - layoutGrid.getScrollbarWidth());
@@ -39,11 +40,11 @@ var OptionsView = function(uiModel) {
 
             this.$el.append(layoutGrid.$el);
 
-            for (var i = 0; i < options._list.length; i++) {
-                var option = options._list[i];
-                var name = option.params.name;
+            for (let i = 0; i < options._list.length; i++) {
+                let option = options._list[i];
+                let name = option.params.name;
                 if (this.layoutActionManager.exists(name) === false) {
-                    var backgroundOption = new OptionControlBase( { name: name });
+                    let backgroundOption = new OptionControlBase( { name: name, _parentControl: null });
                     backgroundOption.setOption(this._getOption(name));
                     this.layoutActionManager.addResource(name, backgroundOption);
                 }
@@ -51,11 +52,10 @@ var OptionsView = function(uiModel) {
 
             this.layoutActionManager.addResource("view", this);
 
-            var self = this;
-            window.setTimeout(function() {
-                self._loaded = true;
-                self.layoutActionManager.initializeAll();
-                self.trigger('loaded');
+            window.setTimeout(() => {
+                this._loaded = true;
+                this.layoutActionManager.initializeAll();
+                this.trigger('loaded');
             }, 0);
         }
         else {
@@ -66,6 +66,9 @@ var OptionsView = function(uiModel) {
     this.dataChanged = function(data) {
         for (let i = 0; i < this._allCtrls.length; i++) {
             let ctrl = this._allCtrls[i];
+            if (ctrl.isDisposed)
+                continue;
+
             if (ctrl.onDataChanged)
                 ctrl.onDataChanged(data);
         }
@@ -73,43 +76,126 @@ var OptionsView = function(uiModel) {
     };
 
     this._getOption = function(id) {
-        if (_.isUndefined(this._ctrlOptions))
-            this._ctrlOptions = {};
-
-        var self = this;
-        var options = this.model.options;
-        var option = options.getOption(id);
+        let option = this.model.options.getOption(id);
         if (option === null)
             return null;
 
-        var ctrlOption = this._ctrlOptions[option.name];
-        if (_.isUndefined(ctrlOption)) {
+        return this._wrapOption(option, false);
+    };
+
+    this._getVirtualOption = function(params) {
+
+        let ctrlOption = this._ctrlOptions[params.name];
+        if (ctrlOption === undefined)
+            return this._wrapOption(new Opt(null, params), true);
+
+        return ctrlOption;
+    };
+
+    this._wrapOption = function(option, isVirtual) {
+        if (option === null)
+            return null;
+
+        if (this._ctrlOptions === undefined)
+            this._ctrlOptions = {};
+
+        let options = this.model.options;
+
+        let ctrlOption = this._ctrlOptions[option.name];
+        if (ctrlOption === undefined) {
             ctrlOption = {
 
                 source: option,
 
-                getProperties: function() {
-                    return option.params;
+                getProperties: function(key, fragmentName) {
+                    if (key === undefined)
+                        key = [];
+
+                    let properties = option.params;
+                    for (let i = 0; i < key.length; i ++) {
+                        let keyItem = key[i];
+                        if (typeof keyItem === 'string') {
+                            let list = null;
+                            if (properties.elements !== undefined)
+                                list = properties.elements;
+                            else
+                                throw "This option requires an 'elements' property to be considered an object.";
+
+                            let found = false;
+                            for (let e = 0; e < list.length; e++) {
+                                let item = list[e];
+                                if (item.name === keyItem) {
+                                    properties = item;
+                                    found = true;
+                                    break;
+                                }
+                            }
+                            if (found === false)
+                                throw "This option does not contain this key.";
+                        }
+                        else if (typeof keyItem === 'number'){
+                            if (properties.template === undefined)
+                                throw "This option requires a 'template' property to be considered an array.";
+                            properties = properties.template;
+                        }
+                        else
+                            throw "This type is not supported as a key item.";
+                    }
+
+                    if (fragmentName) {
+                        let list = null;
+                        if (properties.options !== undefined)
+                            list = properties.options;
+                        else
+                            throw "This option requires an 'options' property to be considered an fragmentable option.";
+
+                        let found = false;
+                        for (let e = 0; e < list.length; e++) {
+                            let item = list[e];
+                            if ((typeof item === 'string' && item === fragmentName) || (typeof item === 'object' && item.name === fragmentName)) {
+                                properties = item;
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (found === false)
+                            throw "This option does not contain this fragment.";
+                    }
+
+                    return properties;
                 },
 
+                isVirtual: isVirtual,
+
                 beginEdit: function() {
-                    options.beginEdit();
+                    if (isVirtual === false)
+                        options.beginEdit();
                 },
 
                 endEdit: function() {
-                    options.endEdit();
+                    if (isVirtual === false)
+                        options.endEdit();
                 },
 
                 insertValueAt: function(value, key, eventParams) {
-                    options.insertOptionValue(option, value, key, eventParams);
+                    if (isVirtual)
+                        option.insertValueAt(value, key);
+                    else
+                        options.insertOptionValue(option, value, key, eventParams);
                 },
 
                 removeAt: function(key, eventParams) {
-                    options.removeOptionValue(option, key, eventParams);
+                    if (isVirtual)
+                        option.removeAt(key);
+                    else
+                        options.removeOptionValue(option, key, eventParams);
                 },
 
                 setValue: function(value, key, eventParams) {
-                    options.setOptionValue(option, value, key, eventParams);
+                    if (isVirtual)
+                        option.setValue(value, key);
+                    else
+                        options.setOptionValue(option, value, key, eventParams);
                 },
 
                 isValueInitialized: function() {
@@ -138,6 +224,10 @@ var OptionsView = function(uiModel) {
 
                 valueInited: function() {
                     return option.valueInited();
+                },
+
+                isValidKey: function(key) {
+                    return option.isValidKey(key);
                 }
             };
             this._ctrlOptions[option.name] = ctrlOption;
@@ -152,20 +242,23 @@ var OptionsView = function(uiModel) {
     };
 
     this._ctrlListValid = true;
-
     this._validateControlList = function() {
         this._ctrlListValid = true;
         let i = 0;
         while (i < this._allCtrls.length) {
             let ctrl = this._allCtrls[i];
-            if (ctrl.isDisposed)
+
+            if (ctrl.isDisposed) {
                 this._allCtrls.splice(i, 1);
+                if (ctrl.hasProperty('name'))
+                    this.model.actionManager.removeResource(ctrl.getPropertyValue('name'));
+            }
             else
                 i += 1;
         }
     };
 
-    this.createSubControl = function(uiDef) {
+    this.createControl = function(uiDef, parent) {
         if (uiDef.type === undefined) {
             if (uiDef.controls !== undefined)
                 uiDef.type = DefaultControls.LayoutBox;
@@ -173,10 +266,29 @@ var OptionsView = function(uiModel) {
                 throw "Type has not been defined for control '"+ uiDef.name + "'";
         }
 
-        var ctrl = new uiDef.type(uiDef);
+        uiDef._parentControl = parent;
 
+        let templateInfo = uiDef._templateInfo;
+        if (uiDef._templateInfo === undefined)
+            templateInfo = parent.getTemplateInfo();
 
-        ctrl._override("onDisposed", () => {
+        if (templateInfo !== null) {
+            if (uiDef.name !== undefined)
+                uiDef.name = uiDef.name + "_" + templateInfo.name + "_" + templateInfo.instanceId;
+            else
+                uiDef.name = "_" + templateInfo.name + "_" + templateInfo.instanceId;
+            uiDef._templateInfo = templateInfo;
+        }
+
+        let ctrl = new uiDef.type(uiDef);
+
+        if (ctrl.getPropertyValue("stage") > this.model.currentStage)
+            return null;
+
+        ctrl._override("onDisposed", (baseFunction) => {
+            if (baseFunction !== null)
+                baseFunction.call(this);
+
             if (this._ctrlListValid === true) {
                 this._ctrlListValid = false;
                 setTimeout(() => { this._validateControlList(); }, 0);
@@ -191,51 +303,26 @@ var OptionsView = function(uiModel) {
 
         this._allCtrls.push(ctrl);
 
-        return ctrl;
-    };
-
-    this.createControl = function(uiDef) {
-        if (uiDef.type === undefined) {
-            if (uiDef.controls !== undefined)
-                uiDef.type = DefaultControls.LayoutBox;
-            else
-                throw "Type has not been defined for control '"+ uiDef.name + "'";
-        }
-
-        var ctrl = new uiDef.type(uiDef);
-
-        if (ctrl.getPropertyValue("stage") > this.model.currentStage)
-            return null;
-
-            ctrl._override("onDisposed", () => {
-                if (this._ctrlListValid === true) {
-                    this._ctrlListValid = false;
-                    setTimeout(() => { this._validateControlList(); }, 0);
-                }
-            });
-
-        if (ctrl.setRequestedDataSource)
-            ctrl.setRequestedDataSource(this._requestedDataSource);
-
-        if (ctrl.setControlManager)
-            ctrl.setControlManager(this);
-
-        this._allCtrls.push(ctrl);
-
-        if (ctrl.hasProperty("name") === false)
+        if (uiDef.name === undefined && ctrl.hasProperty("optionName") === false)
             return ctrl;
 
-        var name = ctrl.getPropertyValue("name");
+        let name = uiDef.name;
         if (ctrl.setOption) {
-            var id = ctrl.getPropertyValue("optionId");
-            if (id === null)
+            let id = ctrl.getPropertyValue("optionName");
+            let isVirtual = false;
+            if (id === null) {
                 id = name;
-            var option = this._getOption(id);
-            if (option === null) {
-                console.log("The option " + id + " does not exist.");
-                ctrl = null;
+                isVirtual = ctrl.getPropertyValue("isVirtual");
             }
+            let option = null;
+            if (isVirtual)
+                option = this._getVirtualOption({ name:id });
+            else if (templateInfo !== null)
+                option = templateInfo.parent.option;
             else
+                option = this._getOption(id);
+
+            if (option !== null)
                 ctrl.setOption(option);
         }
 

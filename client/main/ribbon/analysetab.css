@@ -1,0 +1,50 @@
+.jmv-ribbon-button:not(.jmv-context-menu-button) .jmv-ribbon-button-icon {
+    background-image: url('assets/analysis-other.svg');
+}
+
+.jmv-ribbon-button[data-name=exploration] .jmv-ribbon-button-icon {
+    background-image: url('assets/analysis-descriptives.svg');
+}
+
+.jmv-ribbon-button[data-name=t-tests] .jmv-ribbon-button-icon {
+    background-image: url('assets/analysis-ttest.svg');
+}
+
+.jmv-ribbon-button[data-name=anova] .jmv-ribbon-button-icon {
+    background-image: url('assets/analysis-anova.svg');
+}
+
+.jmv-ribbon-button[data-name=regression] .jmv-ribbon-button-icon {
+    background-image: url('assets/analysis-regression.svg');
+}
+
+.jmv-ribbon-button[data-name=frequencies] .jmv-ribbon-button-icon {
+    background-image: url('assets/analysis-frequencies.svg');
+}
+
+.jmv-ribbon-button[data-name=factor] .jmv-ribbon-button-icon {
+    background-image: url('assets/analysis-factor.svg');
+}
+
+.jmv-ribbon-button[data-name="base r"] .jmv-ribbon-button-icon {
+    background-image: url('assets/analysis-r.svg');
+}
+
+.jmv-ribbon-button[data-name=medmod] .jmv-ribbon-button-icon {
+    background-image: url('assets/analysis-medmod.svg');
+}
+
+.jmv-ribbon-button[data-name=toster] .jmv-ribbon-button-icon {
+    background-image: url('assets/analysis-toster.svg');
+}
+.jmv-ribbon-button[data-name=walrus] .jmv-ribbon-button-icon {
+    background-image: url('assets/analysis-walrus.svg');
+}
+
+.jmv-ribbon-button[data-name=arcade] .jmv-ribbon-button-icon {
+    background-image: url('assets/analysis-jmvarcade.svg');
+}
+
+.jmv-ribbon-button[data-name=modules] .jmv-ribbon-button-icon {
+    background-image: url('assets/analysis-more.svg');
+}

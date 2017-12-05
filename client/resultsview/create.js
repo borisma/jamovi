@@ -16,7 +16,7 @@ const SyntaxView  = require('./syntax').View;
 const HtmlModel = require('./html').Model;
 const HtmlView  = require('./html').View;
 
-const createItem = function(element, $el, level, parent, mode) {
+const createItem = function(element, $el, level, parent, mode, devMode, fmt) {
 
     if (level === undefined)
         level = 1;
@@ -26,7 +26,7 @@ const createItem = function(element, $el, level, parent, mode) {
     let model;
     let view;
 
-    if (element.table) {
+    if (element.type === 'table') {
         model = new TableModel({
             name: element.name,
             title: element.title,
@@ -38,9 +38,10 @@ const createItem = function(element, $el, level, parent, mode) {
             model: model,
             level: level,
             parent: parent,
-            mode: mode });
+            mode: mode,
+            fmt: fmt });
     }
-    else if (element.group) {
+    else if (element.type === 'group') {
 
         let visible = false;
 
@@ -62,13 +63,15 @@ const createItem = function(element, $el, level, parent, mode) {
                 create: createItem,
                 level: level,
                 parent: parent,
-                mode: mode });
+                mode: mode,
+                devMode: devMode,
+                fmt: fmt });
         }
         else {
             view = null;
         }
     }
-    else if (element.image) {
+    else if (element.type === 'image') {
         model = new ImageModel({
             name: element.name,
             title: element.title,
@@ -82,7 +85,7 @@ const createItem = function(element, $el, level, parent, mode) {
             parent: parent,
             mode: mode });
     }
-    else if (element.array) {
+    else if (element.type === 'array') {
 
         let visible = false;
 
@@ -104,28 +107,14 @@ const createItem = function(element, $el, level, parent, mode) {
                 create: createItem,
                 level: level,
                 parent: parent,
-                mode: mode });
+                mode: mode,
+                fmt: fmt });
         }
         else {
             view = null;
         }
     }
-    else if (element.syntax) {
-        model = new SyntaxModel({
-            name : element.name,
-            title : element.title,
-            element : element.syntax,
-            status: element.status,
-            error: element.error,
-            stale: element.stale });
-        view = new SyntaxView({
-            el: $el,
-            model: model,
-            level: level,
-            parent: parent,
-            mode: mode });
-    }
-    else if (element.preformatted) {
+    else if (element.type === 'preformatted') {
         model = new SyntaxModel({
             name : element.name,
             title : element.title,
@@ -140,7 +129,7 @@ const createItem = function(element, $el, level, parent, mode) {
             parent: parent,
             mode: mode });
     }
-    else if (element.html) {
+    else if (element.type === 'html') {
         model = new HtmlModel({
             name : element.name,
             title : element.title,

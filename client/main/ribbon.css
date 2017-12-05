@@ -2,26 +2,30 @@
 .jmv-ribbon {
     width: 100% ;
     color: #777777 ;
-    -webkit-app-region: drag ;
+}
+
+.jmv-ribbon-header {
+    display: flex ;
+    flex-direction: row ;
 }
 
 .jmv-ribbon-tab {
-    display: inline-block ;
     background-color : inherit ;
     color: white ;
     padding: 8px 20px ;
     -webkit-app-region: no-drag;
+    line-height: 100%;
 }
 
 .jmv-ribbon-appmenu {
     position: absolute ;
     right: 6px ;
-    top: 8px ;
-    font-size: 125% ;
+    /*top: 8px ;*/
+    font-size: 150% ;
     text-align: center ;
     width: 24px ;
-    height: 20px ;
-    background-color : #EDEDED ;
+    height: 24px ;
+    color : #FFFFFF ;
     border-radius: 1px ;
     padding: 0 ;
     -webkit-app-region: no-drag;
@@ -32,58 +36,33 @@ body.windows .jmv-ribbon-appmenu {
 }
 
 .jmv-ribbon-appmenu:hover {
-    color: #999999 ;
+    color: #EEEEEE ;
+    background-color: #4675B1 ;
 }
 
 .jmv-ribbon-tab:hover {
     color: #EEEEEE ;
+    background-color: #4675B1 ;
 }
 
 .jmv-ribbon-tab.selected {
-    background-color : #EDEDED ;
+    background-color : #F0F0F0 ;
     color: #3E6DA9 ;
+}
+
+.jmv-ribbon-tab[data-tabname="file"] {
+    padding: 7px 20px;
+    width: 20px;
 }
 
 .jmv-ribbon-body {
     background-color : #F0F0F0 ;
-    height: 50px ;
-    padding: 6px 6px ;
+    height: 58px ;
+    padding: 6px ;
     -webkit-app-region: no-drag;
     display: flex ;
 }
 
 .jmv-ribbon-button-separator {
     flex: 1 1 auto ;
-}
-
-.jmv-ribbon-button .jmv-ribbon-button-icon {
-    background-image: url('assets/analysis-other.svg');
-}
-
-.jmv-ribbon-button[data-name=exploration] .jmv-ribbon-button-icon {
-    background-image: url('assets/analysis-descriptives.svg');
-}
-
-.jmv-ribbon-button[data-name=t-tests] .jmv-ribbon-button-icon {
-    background-image: url('assets/analysis-ttest.svg');
-}
-
-.jmv-ribbon-button[data-name=anova] .jmv-ribbon-button-icon {
-    background-image: url('assets/analysis-anova.svg');
-}
-
-.jmv-ribbon-button[data-name=regression] .jmv-ribbon-button-icon {
-    background-image: url('assets/analysis-regression.svg');
-}
-
-.jmv-ribbon-button[data-name=frequencies] .jmv-ribbon-button-icon {
-    background-image: url('assets/analysis-frequencies.svg');
-}
-
-.jmv-ribbon-button[data-name="base r"] .jmv-ribbon-button-icon {
-    background-image: url('assets/analysis-r.svg');
-}
-
-.jmv-ribbon-button[data-name=modules] .jmv-ribbon-button-icon {
-    background-image: url('assets/analysis-more.svg');
 }

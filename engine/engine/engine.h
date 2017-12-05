@@ -32,6 +32,8 @@ private:
     void messageLoop();
     void analysisRequested(int requestId, Analysis *analysis);
     void resultsReceived(const std::string &results);
+    void opEventReceived(const std::string &message);
+    void periodicChecks();
     void terminate();
     Analysis *waiting();
 

@@ -1,5 +1,6 @@
 
 import sys
+import os
 import os.path as path
 import platform
 
@@ -25,6 +26,7 @@ class Engine:
         WAITING = 0
         INITING = 1
         RUNNING = 2
+        OPPING = 3  # performing operation
 
     def __init__(self, parent, instance_id, index, session_path, conn_root):
         self._parent = parent
@@ -53,6 +55,12 @@ class Engine:
         exe_dir = path.join(conf.get('home'), 'bin')
         exe_path = path.join(exe_dir, 'jamovi-engine')
 
+        env = os.environ.copy()
+        env['R_HOME'] = conf.get('r_home', env.get('R_HOME', ''))
+        env['R_LIBS'] = conf.get('r_libs', env.get('R_LIBS', ''))
+        env['FONTCONFIG_PATH'] = conf.get('fontconfig_path', env.get('FONTCONFIG_PATH', ''))
+        env['JAMOVI_MODULES_PATH'] = conf.get('modules_path', env.get('JAMOVI_MODULES_PATH', ''))
+
         si = None
         stdout = sys.stdout
         stderr = sys.stderr
@@ -72,7 +80,8 @@ class Engine:
             [exe_path, con, pth],
             startupinfo=si,
             stdout=stdout,
-            stderr=stderr)
+            stderr=stderr,
+            env=env)
 
         self._socket = nanomsg.Socket(nanomsg.PAIR)
         self._socket._set_recv_timeout(500)
@@ -143,24 +152,38 @@ class Engine:
 
         self._message_id += 1
         self.analysis = analysis
-        analysis.status = Analysis.Status.RUNNING
 
         request = jcoms.AnalysisRequest()
+
         request.datasetId = self._instance_id
         request.analysisId = analysis.id
         request.name = analysis.name
         request.ns = analysis.ns
-        request.options.CopyFrom(analysis.options.as_pb())
-        request.changed.extend(analysis.changes)
-        request.revision = analysis.revision
-        request.clearState = analysis.clear_state
 
-        if run:
-            request.perform = jcoms.AnalysisRequest.Perform.Value('RUN')
-            self.status = Engine.Status.RUNNING
+        if analysis.status is Analysis.Status.COMPLETE and analysis.needs_op:
+
+            analysis.op.waiting = False
+            request.options.CopyFrom(analysis.options.as_pb())
+            request.perform = jcoms.AnalysisRequest.Perform.Value('SAVE')
+            request.path = analysis.op.path
+            request.part = analysis.op.part
+            self.status = Engine.Status.OPPING
+
         else:
-            request.perform = jcoms.AnalysisRequest.Perform.Value('INIT')
-            self.status = Engine.Status.INITING
+
+            analysis.status = Analysis.Status.RUNNING
+
+            request.options.CopyFrom(analysis.options.as_pb())
+            request.changed.extend(analysis.changes)
+            request.revision = analysis.revision
+            request.clearState = analysis.clear_state
+
+            if run:
+                request.perform = jcoms.AnalysisRequest.Perform.Value('RUN')
+                self.status = Engine.Status.RUNNING
+            else:
+                request.perform = jcoms.AnalysisRequest.Perform.Value('INIT')
+                self.status = Engine.Status.INITING
 
         message = jcoms.ComsMessage()
         message.id = self._message_id
@@ -173,6 +196,14 @@ class Engine:
 
         if self.status is Engine.Status.WAITING:
             log.info('id : {}, response received when not running'.format(message.id))
+        elif self.status is Engine.Status.OPPING:
+            self.status = Engine.Status.WAITING
+            if message.status is jcoms.Status.Value('ERROR'):
+                self.analysis.op.set_exception(RuntimeError(message.error.cause))
+            else:
+                self.analysis.op.set_result(message)
+            self.analysis = None
+            self._parent._send_next()
         else:
             results = jcoms.AnalysisResponse()
             results.ParseFromString(message.payload)
@@ -180,6 +211,8 @@ class Engine:
             if results.revision == self.analysis.revision:
                 complete = False
                 if results.incAsText and results.status == jcoms.AnalysisStatus.Value('ANALYSIS_COMPLETE'):
+                    complete = True
+                elif results.incAsText and results.status == jcoms.AnalysisStatus.Value('ANALYSIS_ERROR'):
                     complete = True
                 elif self.status == Engine.Status.INITING and results.status == jcoms.AnalysisStatus.Value('ANALYSIS_INITED'):
                     complete = True
@@ -251,10 +284,14 @@ class EngineManager:
                     engine.send(analysis)
         for engine in self._engines:
             if engine.is_waiting:
-                for analysis in self._analyses.need_init:
+                for analysis in self._analyses.needs_init:
                     engine.send(analysis, False)
                     break
             if engine.is_waiting:
-                for analysis in self._analyses.need_run:
+                for analysis in self._analyses.needs_op:
+                    engine.send(analysis, True)
+                    break
+            if engine.is_waiting:
+                for analysis in self._analyses.needs_run:
                     engine.send(analysis, True)
                     break

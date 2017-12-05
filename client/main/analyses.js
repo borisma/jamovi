@@ -27,8 +27,14 @@ const Analysis = function(id, name, ns) {
     this._parent = null;
     this._defn = null;
 
-    let url = host.baseUrl + 'analyses/' + ns + '/' + name + '/a.yaml';
+    this.reload();
+};
 
+Analysis.prototype.reload = function() {
+
+    let url = host.baseUrl + 'analyses/' + this.ns + '/' + this.name + '/a.yaml';
+
+    this.isReady = false;
     this.ready = Promise.all([
         Promise.resolve($.get(url, null, null, 'text')).then(response => {
             this._defn = yaml.safeLoad(response);
@@ -72,6 +78,14 @@ Analysis.prototype.renameColumns = function(columnRenames) {
         this._parent._notifyOptionsChanged(this);
 };
 
+Analysis.prototype.clearColumnUse = function(columnNames) {
+    for (let i = 0; i < columnNames.length; i++)
+        this.options.clearColumnUse(columnNames[i]);
+    this.revision++;
+    if (this.deleted === false && this._parent !== null)
+        this._parent._notifyOptionsChanged(this);
+};
+
 Analysis.prototype.getUsing = function() {
     return this.options.getUsedColumns();
 };
@@ -102,6 +116,13 @@ const Analyses = Backbone.Model.extend({
     },
     defaults : {
         dataSetModel : null
+    },
+    hasActiveAnalyses : function() {
+        for (let i = 0; i < this._analyses.length; i++) {
+            if (this._analyses[i].deleted === false)
+                return true;
+        }
+        return false;
     },
     createAnalysis : function(name, ns) {
         let analysis = new Analysis(this._nextId++, name, ns);

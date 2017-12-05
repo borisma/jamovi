@@ -19,7 +19,7 @@ endif
 
 SRCDIR ?= $(dir $(firstword $(MAKEFILE_LIST)))
 TARGET = jamovi-engine
-CFLAGS = -std=c++11 -DUNICODE
+CFLAGS = -std=c++11
 INCLUDES += -I.
 
 ifeq ($(os),OSX)
@@ -30,17 +30,19 @@ ifeq ($(os),OSX)
 			-L$(R_HOME)/lib \
 			-L$(R_HOME)/library/RInside/lib \
 			-lboost_filesystem-mt \
-			-lboost_system-mt
+			-lboost_system-mt \
+			-framework Foundation
 
 else
 ifeq ($(os),Linux)
-	R_HOME = /usr/lib/R
-	INCLUDES += -I/usr/share/R/include
-	LIBS  = -L$(R_HOME)/library/RInside/lib -L$(R_HOME)/site-library/RInside/lib \
+	R_HOME = $(SRCDIR)/../../../lib/R
+	LIBS  = -L$(R_HOME)/lib \
+			-L$(SRCDIR)/../../modules/base/R/RInside/lib \
 			-lboost_filesystem \
 			-lboost_system \
 			-lpthread \
-			-Wl,-R$(R_HOME)/site-library/RInside/lib
+			-Wl,-rpath,'$$ORIGIN/../lib' \
+			-Wl,-rpath,'$$ORIGIN/../Resources/modules/base/R/RInside/lib'
 else
 	R_HOME = $(SRCDIR)/../../../Frameworks/R
 	LIBS =	-L$(SRCDIR)/../../lib \
@@ -49,6 +51,12 @@ else
 			-L$(R_HOME)/library/RInside/lib/x64 \
 			-lboost_filesystem-mgw49-mt-1_60 \
 			-lboost_system-mgw49-mt-1_60
+
+	# _WIN32_WINNT is for SHGetKnownFolderPath
+
+	CFLAGS +=	-DUNICODE \
+				"-D_WIN32_WINNT=_WIN32_WINNT_VISTA" \
+				"-DWIN32_LEAN_AND_MEAN"
 endif
 endif
 
@@ -57,8 +65,10 @@ INCLUDES += \
 	-I$(SRCDIR)/../../../include \
 	-I$(SRCDIR)/../server/jamovi/common \
 	-I$(R_HOME)/include \
-	-I$(R_HOME)/library/RInside/include -I$(R_HOME)/site-library/RInside/include \
-	-I$(R_HOME)/library/Rcpp/include	-I$(R_HOME)/site-library/Rcpp/include
+	-I$(SRCDIR)/../../modules/base/R/RInside/include \
+	-I$(SRCDIR)/../../modules/base/R/Rcpp/include \
+	-I$(R_HOME)/library/RInside/include \
+	-I$(R_HOME)/library/Rcpp/include
 
 LIBS += -lR -lnanomsg -lprotobuf -lRInside
 
@@ -70,6 +80,13 @@ SRCS  = $(subst $(SRCDIR)/,,$(ABS_SRCS))
 
 OBJS += jamovi.pb.cc.o
 OBJS += $(SRCS:.cpp=.cpp.o)
+
+ifeq ($(os),OSX)
+	ABS_M_SRCS  = $(wildcard $(SRCDIR)/../server/jamovi/common/*.m)
+	ABS_M_SRCS += $(wildcard $(SRCDIR)/../server/jamovi/common/**/*.m)
+	M_SRCS = $(subst $(SRCDIR)/,,$(ABS_M_SRCS))
+	OBJS += $(M_SRCS:.m=.m.o)
+endif
 
 $(TARGET): $(OBJS)
 	mkdir -p $(@D)
@@ -85,6 +102,10 @@ jamovi.pb.cc.o: jamovi.pb.cc
 ../server/jamovi/common/%.cpp.o: $(SRCDIR)/../server/jamovi/common/%.cpp
 	mkdir -p $(@D)
 	$(CXX) -c -o $@ $^ $(CFLAGS) $(INCLUDES)
+
+../server/jamovi/common/%.m.o: $(SRCDIR)/../server/jamovi/common/%.m
+	mkdir -p $(@D)
+	$(CXX) -c -o $@ $^ $(INCLUDES)
 
 engine/%.cpp.o: $(SRCDIR)/engine/%.cpp
 	mkdir -p $(@D)

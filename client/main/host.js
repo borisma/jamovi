@@ -4,26 +4,38 @@
 
 'use strict';
 
-const events = new require('events');
+const events = require('events');
+const dialogs = require('dialogs');
+const $ = require('jquery');
+
+const APP_NAME = 'jamovi';
 
 let baseUrl;
 let analysisUIUrl;
 let resultsViewUrl;
 
 let isElectron;
+let version;
+let nameAndVersion;
 
-let openWindow;
-let toggleDevTools;
-let minimizeWindow;
-let maximizeWindow;
-let closeWindow;
-let zoom;
-let zoomIn;
-let zoomOut;
-let currentZoom;
-let setEdited;
-let showMessageBox;
-let navigate;
+let doNothing = () => {};
+
+let openWindow = doNothing;
+let toggleDevTools = doNothing;
+let minimizeWindow = doNothing;
+let maximizeWindow = doNothing;
+let closeWindow = doNothing;
+let zoom = doNothing;
+let zoomIn = doNothing;
+let zoomOut = doNothing;
+let currentZoom = doNothing;
+let setEdited = doNothing;
+let showMessageBox = doNothing;
+let navigate = doNothing;
+let constructMenu = doNothing;
+let copyToClipboard = doNothing;
+let pasteFromClipboard = doNothing;
+let showSaveDialog = doNothing;
 
 let emitter = new events.EventEmitter();
 
@@ -40,7 +52,11 @@ if (window.require) {
     const browserWindow = remote.getCurrentWindow();
     const webContents = browserWindow.webContents;
     const dialog = remote.dialog;
+    const Menu = remote.Menu;
+    const clipboard = electron.clipboard;
 
+    version = Promise.resolve(remote.getGlobal('version'));
+    nameAndVersion = Promise.resolve(APP_NAME + ' ' + remote.getGlobal('version'));
     baseUrl = 'http://localhost:' + remote.getGlobal('mainPort') + '/';
     analysisUIUrl  = 'http://localhost:' + remote.getGlobal('analysisUIPort') + '/';
     resultsViewUrl = 'http://localhost:' + remote.getGlobal('resultsViewPort') + '/';
@@ -113,31 +129,39 @@ if (window.require) {
         ipc.send('request', { type: 'openDevTools' });
     };
 
-    const zoomLevels = [ 0.3, 0.5, 0.67, 0.8, 0.9, 1, 1.1, 1.2, 1.33, 1.5, 1.7, 2.0, 2.4, 3.0 ];
+    const zoomLevels = [ 30, 50, 67, 80, 90, 100, 110, 120, 133, 150, 170, 200, 240, 300 ];
     let zoomLevel = 5;
 
     zoomIn = function() {
-        if (zoomLevel < zoomLevels.length - 1)
-            zoom(zoomLevel + 1);
+        if (zoomLevel < zoomLevels.length - 1) {
+            zoomLevel++;
+            let z = zoomLevels[zoomLevel];
+            zoom(z);
+        }
     };
 
     zoomOut = function() {
-        if (zoomLevel > 0)
-            zoom(zoomLevel - 1);
+        if (zoomLevel > 0) {
+            zoomLevel--;
+            let z = zoomLevels[zoomLevel];
+            zoom(z);
+        }
     };
 
-    zoom = function(level) {
-        zoomLevel = level;
-        let zoom = zoomLevels[level];
+    zoom = function(z) {
+        zoomLevel = zoomLevels.indexOf(z);
+        if (zoomLevel === -1) {
+            zoomLevel = 5;
+            z = 100;
+        }
         webFrame.setLayoutZoomLevelLimits(-999999, 999999);
-        webFrame.setZoomFactor(zoom);
+        webFrame.setZoomFactor(z / 100);
         let ezl = webFrame.getZoomLevel();
         webFrame.setLayoutZoomLevelLimits(ezl, ezl);
-        emitter.emit('zoom', { zoom: zoom });
     };
 
     currentZoom = function() {
-        return webFrame.getZoomFactor();
+        return parseInt(100 * webFrame.getZoomFactor());
     };
 
     showMessageBox = function(options) {
@@ -170,6 +194,26 @@ if (window.require) {
     setEdited = function(edited) {
         browserWindow.setDocumentEdited(edited);
     };
+
+    constructMenu = function(template) {
+        const menu = Menu.buildFromTemplate(template);
+        Menu.setApplicationMenu(menu);
+    };
+
+    copyToClipboard = function(data) {
+        clipboard.write(data);
+    };
+
+    pasteFromClipboard = function() {
+        let text = clipboard.readText();
+        let html = clipboard.readHTML();
+        if (html === text)
+            html = '';
+        return { text: text, html: html };
+    };
+
+    showSaveDialog = dialog.showSaveDialog;
+
 }
 else {
 
@@ -179,12 +223,40 @@ else {
     analysisUIUrl  = window.location.protocol + '//' + window.location.hostname + ':' + (mainPort + 1) + '/';
     resultsViewUrl = window.location.protocol + '//' + window.location.hostname + ':' + (mainPort + 2) + '/';
 
-    openWindow = instanceId => {
-        window.location = window.location.origin + '/?id=' + instanceId;
+    openWindow = (instanceId) => {
+        window.open(window.location.origin + '/?id=' + instanceId, '_blank');
+    };
+    closeWindow = () => {
+        window.close();
+    };
+    navigate = (instanceId) => {
+        window.location = window.location.origin + window.location.pathname + '?id=' + instanceId;
+    };
+
+    version = new Promise((resolve, reject) => {
+        $.ajax('/version', { dataType: 'text'})
+            .done(data => resolve(data.trim()))
+            .fail(reject);
+    });
+
+    nameAndVersion = version.then(version => {
+        return APP_NAME + ' ' + version;
+    });
+
+    currentZoom = () => 100;
+
+    copyToClipboard = () => {
+        // should do something
+    };
+
+    pasteFromClipboard = () => {
+        // should do something
     };
 }
 
-const Host = {
+module.exports = {
+    version,
+    nameAndVersion,
     baseUrl,
     analysisUIUrl,
     resultsViewUrl,
@@ -202,6 +274,8 @@ const Host = {
     showMessageBox,
     setEdited,
     navigate,
+    constructMenu,
+    copyToClipboard,
+    pasteFromClipboard,
+    showSaveDialog,
 };
-
-module.exports = Host;

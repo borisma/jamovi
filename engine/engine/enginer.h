@@ -26,6 +26,7 @@ public:
     void setPath(const std::string &path);
     void setCheckForNewCB(std::function<Analysis*()> check);
 
+    boost::signals2::signal<void (const std::string &)> opEventReceived;
     boost::signals2::signal<void (const std::string &)> resultsReceived;
 
 private:
@@ -41,6 +42,8 @@ private:
     std::string analysisDirPath(const std::string &datasetId, const std::string &analysisId);
     std::string statePath(const std::string &datasetId, const std::string &analysisId);
     Rcpp::List resourcesPath(const std::string &datasetId, const std::string &analysisId, const std::string &elementId, const std::string &suffix);
+
+    void sendResults(bool incOptions = false, bool incAsText = false);
 
     static void createDirectories(const std::string &path);
     static void setLibPaths(const std::string &moduleName);

@@ -15,6 +15,8 @@
 
 #include <boost/bind.hpp>
 
+#include "host.h"
+
 #include "enginer.h"
 #include "analysis.h"
 
@@ -35,6 +37,7 @@ Engine::Engine()
 
     _coms.analysisRequested.connect(bind(&Engine::analysisRequested, this, _1, _2));
     _coms.restartRequested.connect(bind(&Engine::terminate, this));
+    _R->opEventReceived.connect(bind(&Engine::opEventReceived, this, _1));
     _R->resultsReceived.connect(bind(&Engine::resultsReceived, this, _1));
 }
 
@@ -87,7 +90,14 @@ void Engine::start()
         lock.lock(); // lock to access _waiting
 
         while (_waiting == NULL)
-            _condition.wait(lock); // wait for notification from message loop
+        {
+            // wait for notification from message loop
+            cv_status res;
+            res = _condition.wait_for(lock, chrono::milliseconds(250));
+            periodicChecks();
+            if (res == cv_status::timeout)
+                continue;
+        }
 
         _running = _waiting;
         _waiting = NULL;
@@ -100,6 +110,13 @@ void Engine::start()
     }
 
     t.join();
+}
+
+void Engine::periodicChecks()
+{
+    // suicide if parent is running
+    if (Host::isOrphan())
+        terminate();
 }
 
 void Engine::terminate()
@@ -128,6 +145,23 @@ void Engine::analysisRequested(int requestId, Analysis *analysis)
     _waiting = analysis;
 }
 
+void Engine::opEventReceived(const string &msg)
+{
+    ComsMessage message;
+
+    message.set_id(_currentRequestId);
+
+    if (msg != "") {
+        message.mutable_error()->set_message(msg);
+        message.mutable_error()->set_cause(msg);
+        message.set_status(Status::ERROR);
+    }
+
+    string data;
+    message.SerializeToString(&data);
+    nn_send(_socket, data.data(), data.size(), 0);
+}
+
 void Engine::resultsReceived(const string &results)
 {
     // this is called from the main thread
@@ -139,9 +173,7 @@ void Engine::resultsReceived(const string &results)
     message.set_payloadtype("AnalysisResponse");
 
     string data;
-
     message.SerializeToString(&data);
-
     nn_send(_socket, data.data(), data.size(), 0);
 }
 

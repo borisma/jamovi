@@ -2,17 +2,101 @@
 'use strict';
 
 const _ = require('underscore');
-var FormatDef = require('./formatdef');
-var SuperClass = require('../common/superclass');
+const FormatDef = require('./formatdef');
+const SuperClass = require('../common/superclass');
 const RequestDataSupport = require('./requestdatasupport');
+const EventEmitter = require('events');
 
 function View() {
 
     RequestDataSupport.extendTo(this);
+    EventEmitter.call(this);
+    Object.assign(this, EventEmitter.prototype);
 
     this._loaded = true;
     this._updating = false;
     this.workspace = {};
+
+    this.customVariables = [];
+
+    this.setCustomVariables = function(variables) {
+        this.customVariables = variables;
+        let event = { dataType: 'columns' , dataInfo: { measureTypeChanged: false, nameChanged: false, levelsChanged: false, countChanged: true } };
+        this.emit('customVariablesChanged', event);
+        //this._fireEvent("customVariablesChanged", event);
+    };
+
+    this.setCustomVariable = function(name, measureType, levels) {
+        let event = { dataType: 'columns' , dataInfo: { measureTypeChanged: false, nameChanged: false, levelsChanged: false, countChanged: false } };
+
+        let found = false;
+        let changed = false;
+        for (let i = 0; i < this.customVariables.length; i++) {
+            if (this.customVariables[i].name === name) {
+
+                if (measureType !== this.customVariables[i].measureType) {
+                    changed = true;
+                    event.dataInfo.measureTypeChanged = true;
+                    this.customVariables[i].measureType = measureType;
+                }
+
+
+                if (levels !== this.customVariables[i].levels) {
+                    if (levels === undefined || this.customVariables[i].levels === undefined || levels.length !== this.customVariables[i].levels.length) {
+                        changed = true;
+                        event.dataInfo.levelsChanged = true;
+                        this.customVariables[i].levels = levels;
+                    }
+                    else {
+                        for (let j = 0; j < levels.length; j++) {
+                            if (levels[j] !== this.customVariables[i].levels[j]) {
+                                changed = true;
+                                event.dataInfo.levelsChanged = true;
+                                this.customVariables[i].levels = levels;
+                                break;
+                            }
+                        }
+                    }
+                }
+                found = true;
+                break;
+            }
+        }
+
+        if (found === false) {
+            changed = true;
+            event.dataInfo.countChanged = true;
+            this.customVariables.push( { name: name, measureType: measureType, levels: levels });
+        }
+
+        if (changed)
+            this.emit('customVariablesChanged', event);
+    };
+
+    this.removeCustomVariable = function(name) {
+        let found = false;
+        for (let i = 0; i < this.customVariables.length; i++) {
+            if (this.customVariables[i].name === name) {
+                this.customVariables.splice(i, 1);
+                found = true;
+                break;
+            }
+        }
+
+        if (found) {
+            let event = { dataType: 'columns' , dataInfo: { measureTypeChanged: false, nameChanged: false, levelsChanged: false, countChanged: true } };
+            this.emit('customVariablesChanged', event);
+        }
+    };
+
+    this.clearCustomVariables = function(name, measureType, levels) {
+        if (this.customVariables.length > 0) {
+            let event = { dataType: 'columns' , dataInfo: { measureTypeChanged: false, nameChanged: false, levelsChanged: false, countChanged: true } };
+            this.customVariables = [];
+            this.emit('customVariablesChanged', event);
+        }
+    };
+
 
     this._baseEvents = [
         {
@@ -42,7 +126,7 @@ function View() {
         }
     ];
 
-    this.findChanges = function(id, current, updateWS, format) {
+    this.findChanges = function(id, current, updateWS, format, itemProperty) {
         let oldValue = this.workspace[id];
 
         let diff = null;
@@ -50,7 +134,7 @@ function View() {
         if (Array.isArray(current)) {
             diff = { removed: [], added: [], hasChanged: false };
             if (oldValue !== undefined)
-                diff = this.findDifferences(oldValue, current, format);
+                diff = this.findDifferences(oldValue, current, format, itemProperty);
             diff.hasChanged = diff.removed.length > 0 || diff.added.length;
         }
         else {
@@ -71,6 +155,39 @@ function View() {
             this.workspace[id] = current;
 
         return diff;
+    };
+
+    this.checkPairsValue = function(ctrl, variables) {
+        let changed = false;
+        let pairs = this.cloneArray(ctrl.value());
+        if (pairs !== null && pairs.length > 0) {
+            for (let i = 0; i < pairs.length; i++) {
+                let pair = pairs[i];
+                let found = 0;
+                for (let j = 0; j < variables.length; j++) {
+                    let variable = variables[j];
+                    if (pair.i1 === variable)
+                        found += 1;
+                    if (pair.i2 === variable)
+                        found += 2;
+                    if (found === 3)
+                        break;
+                }
+                if (found !== 3) {
+                    changed = true;
+                    if (found === 0) {
+                        pairs.splice(i, 1);
+                        i -= 1;
+                    }
+                    else if (found === 1)
+                        pair.i2 = null;
+                    else if (found === 2)
+                        pair.i1 = null;
+                }
+            }
+            if (changed)
+                ctrl.setValue(pairs);
+        }
     };
 
     this.checkValue = function(ctrl, valueIsList, validValues, format) {
@@ -124,11 +241,14 @@ function View() {
         return clone;
     };
 
-    this.sortArraysByLength = function(arrays) {
+    this.sortArraysByLength = function(arrays, itemPropertyName) {
         var changed = false;
         for (var i = 0; i < arrays.length - 1; i++) {
-            var l1 = arrays[i].length;
-            var l2 = arrays[i+1].length;
+            let item1 = itemPropertyName === undefined ? arrays[i] : arrays[i][itemPropertyName];
+            let item2 = itemPropertyName === undefined ? arrays[i+1] : arrays[i+1][itemPropertyName];
+
+            var l1 = item1.length;
+            var l2 = item2.length;
 
             if (arrays.length > i + 1 && (l1 > l2)) {
                 changed = true;
@@ -143,20 +263,21 @@ function View() {
         return changed;
     };
 
-    this.listContains = function(list, value, format) {
+    this.listContains = function(list, value, format, itemPropertyName) {
         for (var i = 0; i < list.length; i++) {
+            let item = itemPropertyName === undefined ? list[i] : list[i][itemPropertyName];
             if (format === undefined) {
-                if (list[i] === value)
+                if (item === value)
                     return true;
             }
-            else if (format.isEqual(list[i], value))
+            else if (format.isEqual(item, value))
                 return true;
         }
 
         return false;
     };
 
-    this.findDifferences = function(from, to, format) {
+    this.findDifferences = function(from, to, format, itemPropertyName) {
         var j = 0;
 
         var obj = { removed: [], added: [] };
@@ -173,12 +294,14 @@ function View() {
         }
         else {
             for (j = 0; j < from.length; j++) {
-                if (this.listContains(to, from[j], format) === false)
+                let fromItem = itemPropertyName === undefined ? from[j] : from[j][itemPropertyName];
+                if (this.listContains(to, fromItem, format, itemPropertyName) === false)
                     obj.removed.push(from[j]);
             }
 
             for (j = 0; j < to.length; j++) {
-                if (this.listContains(from, to[j], format) === false)
+                let toItem = itemPropertyName === undefined ? to[j] : to[j][itemPropertyName];
+                if (this.listContains(from, toItem, format, itemPropertyName) === false)
                     obj.added.push(to[j]);
             }
         }

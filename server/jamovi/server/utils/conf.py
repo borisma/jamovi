@@ -1,17 +1,19 @@
 
 import sys
+import re
 from os import path
 from os import environ
 from configparser import ConfigParser
-import re
 
 config_values = None
 
 
-def get(key):
+def get(key, otherwise=None):
     global config_values
 
     if config_values is None:
+
+        config_values = { }
 
         if 'JAMOVI_HOME' in environ:
             root = path.abspath(environ['JAMOVI_HOME'])
@@ -23,8 +25,6 @@ def get(key):
         config = ConfigParser()
         config.read(ini_path)
 
-        config_values = { }
-
         for k in environ:
             if k.startswith('JAMOVI_'):
                 config_values[k[7:].lower()] = environ[k]
@@ -34,13 +34,13 @@ def get(key):
         app_config = config['ENV']
         for k in app_config:
             value = app_config[k]
-            if k.startswith('JAMOVI_'):
-                k = k[7:].lower()
-            if k.endswith('_path') or k.endswith('_home'):
-                vars = re.findall(r'\$([A-Z0-9_]+)', value)
-                for v in vars:
-                    value = value.replace('$' + v, environ[v])
-                value = path.normpath(path.join(root, 'bin', value))
+            if k.startswith('jamovi_'):
+                k = k[7:]
+            if k.endswith('path') or k.endswith('home') or k.endswith('libs'):
+                if value != '':
+                    parts = re.split('[:;]', value)
+                    parts = map(lambda x: path.normpath(path.join(root, 'bin', x)), parts)
+                    value = path.pathsep.join(parts)
             config_values[k] = value
 
-    return config_values.get(key)
+    return config_values.get(key, otherwise)

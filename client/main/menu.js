@@ -29,8 +29,8 @@ Menu.prototype._entryClicked = function(event) {
 
     let nextEvent;
     if (entry.op) {
-        nextEvent = { type: 'selected', address: entry.address, op: entry.op };
-        tarp.hide();
+        nextEvent = { type: 'selected', address: entry.address, op: entry.op, target: entry };
+        tarp.hide('menu');
     }
     else {
         nextEvent = { type: 'activated', address: entry.address };
@@ -87,7 +87,7 @@ Menu.prototype.show = function(pos) {
     this.$el.show();
 
     if ( ! this.parent)
-        tarp.show().then(() => {}, () => this.hide());
+        tarp.show('menu').then(() => {}, () => this.hide());
 
     this._showSubMenu();
 };
@@ -152,17 +152,21 @@ Menu.prototype._showSubMenu = function() {
         {
             label  : 'Copy',
             op     : 'copy',
-            address: this.active.address
+            address: this.active.address,
+            type   : this.active.type,
+            title  : this.active.title,
         },
         {
             label  : 'Save',
             op     : 'save',
-            address: this.active.address
+            address: this.active.address,
+            type   : this.active.type,
+            title  : this.active.title,
         },
     ];
 
-    if (this.active.address.length === 1)  // the analysis
-        ops.push({ label: 'Remove', op: 'remove', address: this.active.address });
+    if (this.active.address.length === 0)  // the analysis
+        ops.push({ label: 'Remove', op: 'remove', address: this.active.address, type: 'Analysis' });
 
     this.submenu.setup(ops);
 

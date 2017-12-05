@@ -1,0 +1,91 @@
+
+.silky-target-list-header {
+    margin-bottom: 2px;
+}
+
+.silky-target-list-header.silky-control-margin-small {
+    margin-top: 3px;
+}
+
+.silky-target-list-header.silky-control-margin-normal {
+    margin-top: 5px;
+}
+
+.silky-target-list-header.silky-control-margin-large {
+    margin-top: 10px;
+}
+
+.silky-layout-container:not(.silky-control-body) > .first-row > .silky-target-list-header {
+    margin-top: 0px;
+}
+
+.silky-target-list {
+    border: 1px solid rgb(130, 130, 130);
+    background-color: rgb(255, 255, 255);
+}
+
+.silky-option-list.silky-target-list {
+    margin: 0px;
+}
+
+.jmv-toolbar-button.jmv-variable-interaction-transfer > .jmv-toolbar-button-icon {
+    background-image: url('assets/variable-list-arrow-right.svg');
+}
+
+.jmv-toolbar.arrow-left .jmv-toolbar-button.jmv-variable-transfer > .jmv-toolbar-button-icon {
+    background-image: url('assets/variable-list-arrow.svg');
+}
+
+.jmv-toolbar.arrow-right .jmv-toolbar-button.jmv-variable-transfer > .jmv-toolbar-button-icon {
+    background-image: url('assets/variable-list-arrow-right.svg');
+}
+
+.jmv-toolbar-group-body .jmv-toolbar-button.jmv-variable-transfer, .jmv-toolbar-group-body  .jmv-toolbar-button.jmv-variable-interaction-transfer {
+    width: 34px;
+    height: 28px;
+    border: 1px solid #aeaeae;
+    background-color: #fafafa;
+    margin-left: 10px;
+    margin-right: 10px;
+    margin-bottom: 5px;
+    padding: unset;
+}
+
+.jmv-toolbar:not(.jmv-toolbar-disabled) .jmv-toolbar-button:not(.jmv-toolbar-disabled):hover {
+    background-color: #dbe7f7;
+    border-color: #518fdd;
+}
+
+.jmv-toolbar-group-body .jmv-toolbar-button.jmv-variable-transfer > .jmv-toolbar-button-menu {
+    left: -1px;
+}
+
+.item-insert-on-drop {
+    border: 1px solid transparent;
+    border-top: 1px dotted rgba(0, 0, 0, 0.4);
+}
+
+.silky-option-list-filler {
+    min-height: 5px;
+}
+
+
+.silky-option-list.sub-option-List {
+    border-style: none none none none;
+}
+
+.silky-target-list.sub-targetGrid.selected-sub-targetlist {
+    background-color: #eaf0fa;
+}
+
+.silky-target-list.sub-targetGrid.selected-sub-targetlist .column-ghost-label {
+    color: #b3b3b3
+}
+
+.sub-targetList .silky-target-list-header {
+    font-weight: bold;
+}
+
+.item-hovering.item-overwrite-on-drop {
+    background-color: rgba(0, 0, 0, 0.1);
+}

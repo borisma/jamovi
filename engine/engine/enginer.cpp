@@ -51,17 +51,20 @@ void EngineR::run(Analysis *analysis)
 
     stringstream ss;
 
-    ss << "{\n";
-    ss << "  options <- " << analysis->ns << "::" << analysis->name << "Options$new()\n";
-    ss << "  options$read(optionsPB)\n";
-    ss << "  analysis <- " << analysis->ns << "::" << analysis->name << "Class$new(";
-    ss << "    options=options,";
-    ss << "    datasetId='" << analysis->datasetId << "',";
-    ss << "    analysisId=" << analysis->id << ", ";
-    ss << "    revision=" << analysis->revision << ")\n";
-    ss << "}\n";
+    ss << "analysis <- jmvcore::create(" <<
+        "'" << analysis->ns << "', " <<
+        "'" << analysis->name << "', " <<
+        "optionsPB, " <<
+        "'" << analysis->datasetId << "', " <<
+        analysis->id << ", " <<
+        analysis->revision << ")\n";
 
     rInside.parseEvalQNT(ss.str());
+
+    if (rInside.parseEvalNT("analysis$errored\n")) {
+        sendResults(true, true);
+        return;
+    }
 
     std::function<Rcpp::DataFrame(Rcpp::List)> readDatasetHeader;
     std::function<Rcpp::DataFrame(Rcpp::List)> readDataset;
@@ -88,67 +91,96 @@ void EngineR::run(Analysis *analysis)
 
     rInside.parseEvalQNT("rm(list=c('optionsPB', 'readDatasetHeader', 'readDataset', 'statePath', 'resourcesPath', 'checkpoint'))\n");
 
-    rInside.parseEvalQ("analysis$init()");
+    rInside.parseEvalQNT("analysis$init(noThrow=TRUE)");
+
+    if (rInside.parseEvalNT("analysis$errored\n")) {
+        sendResults(true, true);
+        return;
+    }
 
     if ( ! analysis->clearState)
     {
         Rcpp::CharacterVector changed(analysis->changed.begin(), analysis->changed.end());
         rInside["changed"] = changed;
-        rInside.parseEvalQ("analysis$.load(changed)");
+        rInside.parseEvalQ("try(analysis$.load(changed))");
     }
 
-    Rcpp::RawVector rawVec = _rInside->parseEval("RProtoBuf::serialize(analysis$asProtoBuf(), NULL)\n");
-    std::string raw(rawVec.begin(), rawVec.end());
-    resultsReceived(raw);
-
-    if (rInside.parseEvalNT("analysis$status == 'complete'"))
+    if (analysis->perform == 5)  // SAVE
     {
-        Rcpp::RawVector rawVec = _rInside->parseEval("RProtoBuf::serialize(analysis$asProtoBuf(incOptions=TRUE, incAsText=TRUE), NULL)\n");
-        std::string raw(rawVec.begin(), rawVec.end());
-        resultsReceived(raw);
+        ss.str("");
+        ss << "result <- try(";
+        ss << "  analysis$.savePart(";
+        ss << "  path='" << analysis->path << "',";
+        ss << "  part='" << analysis->part << "',";
+        ss << "  format='" << analysis->format << "')";
+        ss << ", silent=TRUE);";
+        ss << "if (inherits(result, 'try-error')) {";
+        ss << "  result <- jmvcore::extractErrorMessage(result)";
+        ss << "} else {";
+        ss << "  result <- ''";  // success
+        ss << "};";
+        ss << "result";
 
-        rInside.parseEvalQ("analysis$.save();");
+        std::string result = rInside.parseEval(ss.str());
+
+        opEventReceived(result);
+    }
+    else if (rInside.parseEvalNT("analysis$errored || analysis$complete"))
+    {
+        sendResults(true, true);
+        rInside.parseEvalQ("try(analysis$.save())");
     }
     else if (analysis->perform == 0)   // INIT
     {
-        rInside.parseEvalQ("analysis$.save();");
+        sendResults();
+        rInside.parseEvalQ("try(analysis$.save())");
     }
     else
     {
+        sendResults();
+
         bool shouldSend = rInside.parseEvalNT("analysis$run(noThrow=TRUE);");
         if ( ! shouldSend)
             return;
 
-        Rcpp::RawVector rawVec2 = _rInside->parseEval("RProtoBuf::serialize(analysis$asProtoBuf(), NULL)\n");
-        std::string raw2(rawVec2.begin(), rawVec2.end());
-        resultsReceived(raw2);
-
-        rInside.parseEvalQNT("analysis$render();");
-
-        Rcpp::RawVector rawVec3 = _rInside->parseEval("RProtoBuf::serialize(analysis$asProtoBuf(), NULL)\n");
-        std::string raw3(rawVec3.begin(), rawVec3.end());
-        resultsReceived(raw3);
-
-        Rcpp::RawVector rawVec4 = _rInside->parseEval("RProtoBuf::serialize(analysis$asProtoBuf(incOptions=TRUE, incAsText=TRUE), NULL)\n");
-        std::string raw4(rawVec4.begin(), rawVec4.end());
-        resultsReceived(raw4);
-
-        rInside.parseEvalQ("analysis$.save();");
+        sendResults();
+        rInside.parseEvalQNT("analysis$.createImages(noThrow=TRUE);");
+        sendResults();
+        sendResults(true, true);
+        rInside.parseEvalQ("try(analysis$.save())");
     }
+}
+
+void EngineR::sendResults(bool incOptions, bool incAsText)
+{
+    stringstream ss;
+    ss << "analysis$serialize(";
+    ss << "incOptions=" << (incOptions ? "TRUE" : "FALSE") << ", ";
+    ss << "incAsText=" << (incAsText ? "TRUE" : "FALSE") << ")\n";
+    Rcpp::RawVector rawVec = _rInside->parseEval(ss.str());
+    string raw(rawVec.begin(), rawVec.end());
+    resultsReceived(raw);
 }
 
 void EngineR::setLibPaths(const std::string &moduleName)
 {
     stringstream ss;
 
+    char *cPath;
     string path;
     vector<string> sysR;
     vector<string> moduleR;
 
-    path = nowide::getenv("R_LIBS");
+    cPath = nowide::getenv("R_LIBS");
+    if (cPath != NULL)
+        path = cPath;
+
     algorithm::split(sysR, path, algorithm::is_any_of(";:"), token_compress_on);
 
-    path = nowide::getenv("JAMOVI_MODULES_PATH");
+    cPath = nowide::getenv("JAMOVI_MODULES_PATH");
+    if (cPath != NULL)
+        path = cPath;
+
     algorithm::split(moduleR, path, algorithm::is_any_of(";:"), token_compress_on);
 
     ss << "base::.libPaths(c(";
@@ -211,7 +243,7 @@ Rcpp::DataFrame EngineR::readDataset(const string &datasetId, Rcpp::List columns
     Rcpp::CharacterVector rowNames(rowCount);
 
     for (int i = 0; i < rowCount; i++)
-        rowNames[i] = std::to_string(i);
+        rowNames[i] = Rcpp::String(std::to_string(i));
 
     int index = 0;
 
@@ -231,7 +263,7 @@ Rcpp::DataFrame EngineR::readDataset(const string &datasetId, Rcpp::List columns
         if ( ! required)
             continue;
 
-        columnNames[index] = columnName;
+        columnNames[index] = Rcpp::String(columnName);
 
         if (column.measureType() == MeasureType::CONTINUOUS)
         {
@@ -248,7 +280,7 @@ Rcpp::DataFrame EngineR::readDataset(const string &datasetId, Rcpp::List columns
 
             // populate levels
 
-            vector<pair<int, string> > m = column.levels();
+            vector<LevelData > m = column.levels();
 
             Rcpp::CharacterVector levels(m.size());
             Rcpp::IntegerVector values(m.size());
@@ -258,10 +290,10 @@ Rcpp::DataFrame EngineR::readDataset(const string &datasetId, Rcpp::List columns
 
             for (auto p : m)
             {
-                values[j] = p.first;
-                levels[j] = p.second;
+                values[j] = p.value;
+                levels[j] = Rcpp::String(p.label);
                 j++;
-                indexes[p.first] = j;
+                indexes[p.value] = j;
             }
 
             // populate cells
@@ -320,7 +352,7 @@ string EngineR::analysisDirPath(const std::string &datasetId, const string &anal
 
 std::string EngineR::statePath(const string &datasetId, const string &analysisId)
 {
-    return analysisDirPath(datasetId, analysisId) + "/state";
+    return analysisDirPath(datasetId, analysisId) + "/analysis";
 }
 
 Rcpp::List EngineR::resourcesPath(const std::string &datasetId, const string &analysisId, const std::string &elementId, const std::string &suffix)
@@ -361,7 +393,19 @@ void EngineR::initR()
 
     _rInside = new RInside();
 
+    char *pandoc = nowide::getenv("PANDOCHOME");
+
+    if (pandoc != NULL)
+    {
+        stringstream ss;
+        ss << "Sys.setenv(RSTUDIO_PANDOC='" << pandoc << "')\n";
+        _rInside->parseEvalQNT(ss.str());
+    }
+
     setLibPaths("jmv");
+
+    // without this, on macOS, knitr tries to load X11
+    _rInside->parseEvalQNT("env <- knitr::knit_global();env$CairoPNG <- grDevices::png\n");
 
     // change the interaction component separator to an asterisk
     _rInside->parseEvalQNT("sep <- ' \u273B '; base::Encoding(sep) <- 'UTF-8'; options(jmvTermSep=sep); rm(list='sep')\n");

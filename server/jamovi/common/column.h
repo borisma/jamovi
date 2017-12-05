@@ -11,6 +11,12 @@
 #include <vector>
 #include <utility>
 
+#ifdef _WIN32
+#define ALIGN_8 alignas(8)
+#else
+#define ALIGN_8 __attribute__ ((aligned (8)))
+#endif
+
 class DataSet;
 
 typedef struct
@@ -19,9 +25,10 @@ typedef struct
     int length;
     int capacity;
 
-    char values[8];
+    char values[8] ALIGN_8;
 
 } Block;
+
 
 #define BLOCK_SIZE 32768
 #define VALUES_SPACE (BLOCK_SIZE - sizeof(Block) + 8)
@@ -30,8 +37,10 @@ typedef struct
 {
     int value;
     int capacity;
+    int importCapacity;
     int count;
     char *label;
+    char *importValue;
 
 } Level;
 
@@ -40,6 +49,7 @@ typedef struct
     int id;
     char *name;
     char *importName;
+    char columnType;
     char measureType;
     char autoMeasure;
     int rowCount;
@@ -53,21 +63,45 @@ typedef struct
     int levelsCapacity;
     Level *levels;
 
+    char *formula;
+    int formulaCapacity;
+    char *formulaMessage;
+    int formulaMessageCapacity;
+
     char dps;
 
     char changes;
 
 } ColumnStruct;
 
+typedef struct LevelData
+{
+    int value;
+    std::string label;
+    std::string importValue;
+
+} LevelData;
+
 namespace MeasureType
 {
     enum Type
     {
-        MISC = 0,
+        NONE = 0,
         NOMINAL_TEXT = 1,
         NOMINAL = 2,
         ORDINAL = 3,
         CONTINUOUS = 4
+    };
+}
+
+namespace ColumnType
+{
+    enum Type
+    {
+        NONE = 0,
+        DATA = 1,
+        COMPUTED = 2,
+        RECODED = 3
     };
 }
 
@@ -83,14 +117,18 @@ public:
     int rowCount() const;
     int dps() const;
 
+    ColumnType::Type columnType() const;
     MeasureType::Type measureType() const;
     bool autoMeasure() const;
     int levelCount() const;
-    std::vector<std::pair<int, std::string> > levels() const;
+    const std::vector<LevelData> levels() const;
     const char *getLabel(int value) const;
+    const char *getImportValue(int value) const;
     int valueForLabel(const char *label) const;
     bool hasLevel(const char *label) const;
     bool hasLevel(int value) const;
+    const char *formula() const;
+    const char *formulaMessage() const;
 
     template<typename T> T value(int rowIndex)
     {

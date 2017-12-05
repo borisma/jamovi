@@ -17,6 +17,7 @@ class Main {  // this is constructed at the bottom
         this.mainWindow = null;
         this.results = null;
         this.$results = null;
+        this.resultsDefn = null;
         this.active = null;
 
         window.addEventListener('message', event => this._messageEvent(event));
@@ -28,6 +29,16 @@ class Main {  // this is constructed at the bottom
                 type : 'setOption',
                 data : { name, value }}, '*');
         };
+
+        window.setCustom = (address, options) => {
+            this.mainWindow.postMessage({
+                type : 'setCustom',
+                data : { address, options }}, '*');
+        };
+
+        $(document).ready(() => {
+            this.$body = $('body');
+        });
     }
 
     _reallyNotifyResize() {
@@ -65,26 +76,8 @@ class Main {  // this is constructed at the bottom
         let eventData = hostEvent.data;
 
         if (hostEvent.type === 'results') {
-            let content = '';
-            let $body = $('body');
-            $body.attr('data-mode', eventData.mode);
-            $body.empty();
-
-            this.$results = $('<div id="results"></div>');
-            this.results = createItem(
-                eventData.results,
-                this.$results,
-                0,
-                { _sendEvent: event => this._sendMenuRequest(event) },
-                eventData.mode);
-            this.$results.appendTo($body);
-
-            $(document).ready(() => {
-                let erd = ERDM({ strategy: "scroll" });
-                erd.listenTo(this.$results[0], (element) => {
-                    this._notifyResize();
-                });
-            });
+            this.resultsDefn = eventData;
+            this._render();
         }
         else if (hostEvent.type === 'click') {
             let el = document.elementFromPoint(hostEvent.pageX, hostEvent.pageY);
@@ -100,10 +93,35 @@ class Main {  // this is constructed at the bottom
         }
     }
 
+    _render() {
+        this.$body.attr('data-mode', this.resultsDefn.mode);
+        this.$body.empty();
+
+        this.$results = $('<div id="results"></div>');
+        this.results = createItem(
+            this.resultsDefn.results,
+            this.$results,
+            0,
+            { _sendEvent: event => this._sendMenuRequest(event) },
+            this.resultsDefn.mode,
+            this.resultsDefn.devMode,
+            this.resultsDefn.format);
+        this.$results.appendTo(this.$body);
+
+        this.$selector = $('<div id="selector"></div>').appendTo(this.$body);
+
+        $(document).ready(() => {
+            let erd = ERDM({ strategy: 'scroll' });
+            erd.listenTo(this.$results[0], (element) => {
+                this._notifyResize();
+            });
+        });
+    }
+
     _menuEvent(event) {
 
         if (this.active !== null) {
-            this.active.$el.removeClass('active');
+            this.$selector.css('opacity', '0');
             this.active = null;
         }
 
@@ -112,12 +130,10 @@ class Main {  // this is constructed at the bottom
 
         let address = event.address;
 
-        if (address.length === 1) {
+        if (address.length === 0) {
             this.active = this.results;
         }
         else {
-            address = _.clone(address);
-            address.shift();
             this.active = this.results.get(address);
         }
 
@@ -129,7 +145,21 @@ class Main {  // this is constructed at the bottom
                 }
                 break;
             case 'activated':
-                this.active.$el.addClass('active');
+                let pos = this.active.$el.offset();
+                let width = this.active.$el.outerWidth();
+                let height = this.active.$el.outerHeight();
+                let padTB = 0;
+                let padLR = 12;
+
+                if (this.active.$el.is(this.$results))
+                    padTB = padLR = 0;
+
+                this.$selector.css({
+                    left:   pos.left - padLR,
+                    top:    pos.top  - padTB,
+                    width:  width  + 2 * padLR,
+                    height: height + 2 * padTB,
+                    opacity: 1 });
                 break;
         }
     }
